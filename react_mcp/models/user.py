@@ -12,7 +12,6 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    full_name = Column(String, nullable=True)
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
 
@@ -21,14 +20,12 @@ class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
-    full_name: Optional[str] = None
 
 # Pydantic model for response data (password excluded)
 class UserResponse(BaseModel):
     id: int
     username: str
     email: EmailStr
-    full_name: Optional[str] = None
     is_active: bool
 
     class Config:

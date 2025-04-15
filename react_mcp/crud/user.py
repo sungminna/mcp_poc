@@ -20,7 +20,6 @@ def create_user(db: Session, user: UserCreate):
     db_user = User(
         username=user.username,
         email=user.email,
-        full_name=user.full_name,
         hashed_password=hashed_password,
         is_active=True # Default to active on creation
     )

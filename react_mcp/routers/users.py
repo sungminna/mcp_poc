@@ -10,7 +10,7 @@ from core.security import get_current_active_user
 router = APIRouter()
 
 # User creation endpoint (public)
-@router.post("/users/", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["users"])
+@router.post("/api/users/", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["users"])
 def create_user_endpoint(user: UserCreate, db: Session = Depends(get_db)):
     db_user_by_username = crud_user.get_user_by_username(db, username=user.username)
     if db_user_by_username:
@@ -22,12 +22,12 @@ def create_user_endpoint(user: UserCreate, db: Session = Depends(get_db)):
     return created_user # Already a User object, Pydantic handles conversion
 
 # Endpoint to get current authenticated user's details
-@router.get("/users/me", response_model=UserResponse, tags=["users"])
+@router.get("/api/users/me", response_model=UserResponse, tags=["users"])
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     return current_user
 
 # Endpoint to get a specific user by ID (requires authentication)
-@router.get("/users/{user_id}", response_model=UserResponse, tags=["users"])
+@router.get("/api/users/{user_id}", response_model=UserResponse, tags=["users"])
 def read_user_endpoint(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     # You might want to add permission checks here, e.g., if only admin or the user themselves can access
     db_user = crud_user.get_user(db, user_id=user_id)
@@ -37,7 +37,7 @@ def read_user_endpoint(user_id: int, db: Session = Depends(get_db), current_user
 
 # Endpoint to get a list of users (requires authentication)
 # Consider adding pagination and potentially admin-only access
-@router.get("/users/", response_model=List[UserResponse], tags=["users"])
+@router.get("/api/users/", response_model=List[UserResponse], tags=["users"])
 def read_users_endpoint(skip: int = 0, limit: int = 10, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     # Add permission checks if needed (e.g., only admins can list all users)
     users = crud_user.get_users(db, skip=skip, limit=limit)

@@ -2,6 +2,7 @@
     import ChatMessage from '$lib/components/ChatMessage.svelte';
     import { onMount, tick } from 'svelte';
     import { slide } from 'svelte/transition';
+    import { goto } from '$app/navigation';
 
     const sendIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" /></svg>`;
 
@@ -16,6 +17,7 @@
     let chatContainer: HTMLDivElement;
     let loadingAIResponse = false;
     let textareaElement: HTMLTextAreaElement;
+    let isAuthenticated = false;
 
     async function getAIResponse(inputText: string): Promise<string> {
         loadingAIResponse = true;
@@ -59,9 +61,18 @@
         textareaElement.style.height = `${requiredHeight}px`;
     }
 
+    async function handleLogout() {
+        localStorage.removeItem('authToken');
+        isAuthenticated = false;
+        await goto('/login');
+    }
+
     onMount(() => {
+        const token = localStorage.getItem('authToken');
+        isAuthenticated = !!token;
+
         messages = [
-            { id: 1, text: 'ㅎㅇㅎㅇ! 뭐 하고 있었어? ��', sender: 'ai' },
+            { id: 1, text: 'ㅎㅇㅎㅇ! 뭐 하고 있었어? 😊', sender: 'ai' },
         ];
         adjustTextareaHeight();
         tick().then(scrollToBottom);
@@ -71,7 +82,15 @@
 
 <div class="chat-page-container">
     <header class="chat-header">
-        ㅎㅇ
+        <span class="header-title">Velt Chat</span>
+        {#if isAuthenticated}
+            <button on:click={handleLogout} class="auth-button logout-button">로그아웃</button>
+        {:else}
+            <div class="auth-buttons">
+                <a href="/login" class="auth-button login-button">로그인</a>
+                <a href="/signup" class="auth-button signup-button">회원가입</a>
+            </div>
+        {/if}
     </header>
 
     <div class="chat-messages-wrapper">
@@ -130,12 +149,61 @@
 
     .chat-header {
         padding: 10px 20px;
-        text-align: center;
+        display: flex; /* Use flexbox for layout */
+        justify-content: space-between; /* Space out title and buttons */
+        align-items: center; /* Vertically align items */
         font-size: 1rem;
-        color: #8e8e8e; /* Grayish color */
-        border-bottom: 1px solid #f0f0f0; /* Subtle border */
-        flex-shrink: 0; /* Prevent header from shrinking */
+        color: #333; /* Darker header text */
+        border-bottom: 1px solid #e5e5e5; /* Slightly darker border */
         background-color: #ffffff;
+        flex-shrink: 0; /* Prevent header from shrinking */
+        position: relative; /* Needed for potential absolute positioning inside */
+    }
+
+    .header-title {
+        font-weight: 600;
+    }
+
+    .auth-buttons {
+        display: flex;
+        gap: 10px; /* Space between buttons */
+    }
+
+    .auth-button {
+        padding: 6px 12px;
+        border: 1px solid transparent; /* Base border */
+        border-radius: 6px;
+        text-decoration: none;
+        font-size: 0.85rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out, color 0.2s ease-in-out;
+    }
+
+    .login-button {
+        background-color: #e7f3ff; /* Light blue background */
+        color: #007bff; /* Blue text */
+        border-color: #cfe2ff; /* Subtle blue border */
+    }
+    .login-button:hover {
+        background-color: #cfe2ff;
+    }
+
+    .signup-button {
+        background-color: #007bff; /* Blue background */
+        color: white;
+    }
+    .signup-button:hover {
+         background-color: #0056b3;
+    }
+
+    .logout-button {
+        background-color: #f8d7da; /* Light red background */
+        color: #721c24; /* Dark red text */
+        border-color: #f5c6cb; /* Subtle red border */
+    }
+    .logout-button:hover {
+        background-color: #f5c6cb;
     }
 
     /* Added wrapper for messages padding */

@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from core.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from database import get_db
 from models.user import TokenData, User
-from crud.user import get_user_by_username
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -34,6 +33,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    # Import crud.user here to avoid circular import at module level
+    from crud import user as crud_user
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -47,7 +49,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
-    user = get_user_by_username(db, username=token_data.username)
+
+    # Use the imported crud_user module
+    user = crud_user.get_user_by_username(db, username=token_data.username)
     if user is None:
         raise credentials_exception
     return user

@@ -12,7 +12,7 @@ from models.user import Token
 
 router = APIRouter()
 
-@router.post("/token", response_model=Token, tags=["auth"])
+@router.post("/api/auth/token", response_model=Token, tags=["auth"])
 async def login_for_access_token(db: Session = Depends(get_db), form_data: OAuth2PasswordRequestForm = Depends()):
     user = crud.user.get_user_by_username(db, username=form_data.username)
     if not user or not security.verify_password(form_data.password, user.hashed_password):
