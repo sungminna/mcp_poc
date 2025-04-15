@@ -14,37 +14,120 @@
 
     let messages: Message[] = [];
     let newMessageText: string = '';
-    let chatContainer: HTMLDivElement;
     let loadingAIResponse = false;
     let textareaElement: HTMLTextAreaElement;
+    let chatWrapperElement: HTMLDivElement;
     let isAuthenticated = false;
 
     async function getAIResponse(inputText: string): Promise<string> {
         loadingAIResponse = true;
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        loadingAIResponse = false;
-        return `흠... "${inputText}"라고 하셨군요. 흥미롭네요!`;
+        const token = localStorage.getItem('authToken');
+        let aiResponse = '오류: AI 응답을 가져올 수 없습니다.'; // Default error response
+
+        // If not authenticated, provide a specific message or handle as needed
+        if (!token) {
+             loadingAIResponse = false;
+            // Option 1: Return an error message
+            // return '오류: 채팅 기능을 사용하려면 로그인이 필요합니다.';
+            // Option 2: Redirect to login (more user-friendly)
+            await goto('/login?redirectTo=/'); // Add redirectTo query param if needed
+            return ''; // Prevent further processing
+        }
+
+        try {
+            // Replace '/api/chat/' with your actual FastAPI chat endpoint
+            const response = await fetch('/api/chat/', { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    // Include the JWT token in the Authorization header
+                    'Authorization': `Bearer ${token}`,
+                },
+                // Send the user message in the expected format
+                body: JSON.stringify({ user_message: inputText }), 
+            });
+
+            if (response.status === 401) {
+                // Handle unauthorized access (e.g., token expired)
+                localStorage.removeItem('authToken'); // Clear invalid token
+                isAuthenticated = false;
+                await goto('/login?sessionExpired=true'); // Redirect to login with a message
+                return ''; // Stop processing
+            }
+
+            if (!response.ok) {
+                // Handle other API errors
+                let errorData = { detail: 'API 오류가 발생했습니다.' };
+                try {
+                  errorData = await response.json();
+                } catch (jsonError) { /* Ignore if response is not JSON */ }
+                throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            
+            // Extract the AI response from the expected field ('ai_response')
+            if (data && data.ai_response) {
+                 aiResponse = data.ai_response;
+            } else {
+                console.error('Unexpected API response format:', data);
+                throw new Error('수신된 데이터 형식이 올바르지 않습니다.');
+            }
+
+        } catch (error: any) {
+            console.error('Failed to get AI response:', error);
+            // Use the error message caught or a default one
+            aiResponse = error.message || 'AI 응답 처리 중 오류 발생'; 
+        } finally {
+            loadingAIResponse = false;
+        }
+        return aiResponse;
+    }
+
+    // Function to scroll the chat wrapper to the bottom smoothly
+    async function scrollToBottom() {
+        await tick(); // Wait for DOM updates after message added
+        if (chatWrapperElement) {
+            // Smooth scroll to bottom
+            chatWrapperElement.scrollTo({
+                top: chatWrapperElement.scrollHeight,
+                behavior: 'smooth'
+            });
+            
+            // Also set a timeout to ensure scroll happens after animation
+            setTimeout(() => {
+                chatWrapperElement.scrollTo({
+                    top: chatWrapperElement.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }, 300);
+        }
     }
 
     async function sendMessage() {
         const text = newMessageText.trim();
         if (!text || loadingAIResponse) return;
 
+        // Add user message and scroll
         messages = [...messages, { id: Date.now(), text, sender: 'user' }];
-        tick().then(scrollToBottom);
+        await tick(); // Ensure DOM updates before scrolling
+        scrollToBottom(); // <-- Scroll after user message
 
         newMessageText = '';
         await tick();
         adjustTextareaHeight();
 
-        const aiResponseText = await getAIResponse(text);
-        messages = [...messages, { id: Date.now() + 1, text: aiResponseText, sender: 'ai' }];
-        tick().then(scrollToBottom);
-    }
-
-    function scrollToBottom() {
-        if (chatContainer) {
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+        // Get AI response, add it, and scroll
+        const aiResponseText = await getAIResponse(text); // This now calls the real API
+        // Only add AI message if the response is not empty (e.g., not redirected)
+        if (aiResponseText) {
+            messages = [...messages, { id: Date.now() + 1, text: aiResponseText, sender: 'ai' }];
+            await tick(); // Wait for DOM to update with the new message
+            
+            // Give extra time for transition animation to start
+            setTimeout(() => {
+                scrollToBottom(); // <-- Scroll after AI message
+            }, 100);
         }
     }
 
@@ -72,10 +155,10 @@
         isAuthenticated = !!token;
 
         messages = [
-            { id: 1, text: 'ㅎㅇㅎㅇ! 뭐 하고 있었어? 😊', sender: 'ai' },
+            { id: 1, text: 'ㅎㅇㅎㅇ! 궁금한거 물어봐줘? 😊', sender: 'ai' },
         ];
         adjustTextareaHeight();
-        tick().then(scrollToBottom);
+        scrollToBottom(); // <-- Scroll on initial load
     });
 
 </script>
@@ -93,8 +176,8 @@
         {/if}
     </header>
 
-    <div class="chat-messages-wrapper">
-        <div class="chat-messages" bind:this={chatContainer}>
+    <div class="chat-messages-wrapper" bind:this={chatWrapperElement}>
+        <div class="chat-messages">
             {#each messages as message (message.id)}
                 <div transition:slide={{ duration: 300 }}>
                      <ChatMessage {message} />

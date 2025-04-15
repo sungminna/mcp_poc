@@ -13,20 +13,6 @@
         loading: isLoading ? 'loading' : ''
     };
 
-    // Add copy and edit icons (using simple text for now, replace with SVGs if needed)
-    const copyIcon = '📄';
-    const editIcon = '✏️';
-
-    function copyText() {
-        navigator.clipboard.writeText(message.text);
-        // Optionally show a notification
-    }
-
-    function editText() {
-        // Placeholder for edit functionality
-        console.log("Edit requested for:", message.text);
-    }
-
 </script>
 
 <div class="message-wrapper {message.sender === 'user' ? 'user' : 'ai'}">
@@ -37,12 +23,6 @@
             <div class="message-content">
                 {message.text}
             </div>
-            {#if message.sender === 'ai' && !isLoading}
-                <div class="message-actions">
-                    <button on:click={copyText} title="Copy text">{copyIcon}</button>
-                    <button on:click={editText} title="Edit text">{editIcon}</button>
-                </div>
-            {/if}
         {/if}
     </div>
 </div>
@@ -92,28 +72,6 @@
     .message-content {
        /* Basic styling for text content */
        margin-bottom: 5px; /* Space between text and actions */
-    }
-
-    .message-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 5px; /* Space above actions */
-        align-self: flex-start; /* Align actions to the left within the bubble */
-        opacity: 0.6; /* Make icons less prominent */
-    }
-
-    .message-actions button {
-        background: none;
-        border: none;
-        padding: 2px;
-        cursor: pointer;
-        font-size: 0.9rem;
-        line-height: 1;
-        color: #666; /* Icon color */
-    }
-
-    .message-actions button:hover {
-        color: #000;
     }
 
     .loading {
