@@ -1,25 +1,47 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List
 from sqlalchemy.orm import Session
+import asyncio # Import asyncio
+import logging # Import logging
 
 from models.user import UserCreate, UserResponse, User
 from crud import user as crud_user
 from database import get_db
 from core.security import get_current_active_user
+from services.neo4j_service import neo4j_service # Import Neo4j service
 
 router = APIRouter()
+logger = logging.getLogger(__name__) # Setup logger
 
 # User creation endpoint (public)
 @router.post("/api/users/", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["users"])
-def create_user_endpoint(user: UserCreate, db: Session = Depends(get_db)):
+async def create_user_endpoint(user: UserCreate, db: Session = Depends(get_db)):
     db_user_by_username = crud_user.get_user_by_username(db, username=user.username)
     if db_user_by_username:
         raise HTTPException(status_code=400, detail="Username already registered")
     db_user_by_email = crud_user.get_user_by_email(db, email=user.email)
     if db_user_by_email:
         raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Create user in the primary database
     created_user = crud_user.create_user(db=db, user=user)
-    return created_user # Already a User object, Pydantic handles conversion
+
+    # After successful creation in primary DB, add to Neo4j
+    try:
+        # We need to run the async Neo4j call
+        neo4j_task = asyncio.create_task(
+            neo4j_service.add_user(username=created_user.username, user_info=user.dict())
+        )
+        # Optionally, you could await the task if you need confirmation before responding,
+        # but for faster response times, we can let it run in the background.
+        # await neo4j_task
+        # Check neo4j_task.result() or neo4j_task.exception() if awaited
+        logger.info(f"Neo4j add_user task created for user '{created_user.username}'")
+    except Exception as e:
+        # Log the error but don't fail the user creation process
+        logger.error(f"Failed to initiate Neo4j user creation for '{created_user.username}': {e}")
+
+    return created_user # Return the user object from the primary DB
 
 # Endpoint to get current authenticated user's details
 @router.get("/api/users/me", response_model=UserResponse, tags=["users"])

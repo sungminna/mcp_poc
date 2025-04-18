@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j # Use an appropriate Neo4j version
+    container_name: neo4j_db
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    volumes:
+      - neo4j_data:/data
+    environment:
+      - NEO4J_AUTH=neo4j/password # Change password in production!
+      # - NEO4J_PLUGINS=["apoc", "graph-data-science"] # Uncomment to add plugins if needed
+
+volumes:
+  neo4j_data: 
