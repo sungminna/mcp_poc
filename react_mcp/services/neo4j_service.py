@@ -6,6 +6,7 @@ from typing import List, Any, Dict
 import asyncio
 from functools import partial
 from openai import AsyncOpenAI, OpenAIError
+from datetime import datetime
 
 load_dotenv()
 
@@ -144,6 +145,21 @@ class Neo4jService:
             logger.info(f"Vector index '{VECTOR_INDEX_NAME}' creation attempted (run in thread).")
         except Exception as e:
             logger.error(f"Vector index creation failed or thread execution error: {e}")
+
+        # Create relationship vector index
+        rel_index_query = f"""
+            CREATE VECTOR INDEX {REL_VECTOR_INDEX_NAME} IF NOT EXISTS
+            FOR ()-[r:RELATES_TO]-() ON (r.embedding)
+            OPTIONS {{ indexConfig: {{
+                `vector.dimensions`: {EMBEDDING_DIMENSION},
+                `vector.similarity_function`: 'cosine'
+            }} }}
+        """
+        try:
+            await asyncio.to_thread(_sync_run_write_query, driver, rel_index_query)
+            logger.info(f"Vector index '{REL_VECTOR_INDEX_NAME}' creation attempted (run in thread).")
+        except Exception as e:
+            logger.error(f"Relationship vector index creation failed: {e}")
 
     async def add_user(self, username: str, user_info: dict):
         """Creates or updates a User node using sync calls in threads."""
@@ -325,8 +341,20 @@ class Neo4jService:
             CALL db.index.vector.queryNodes('{VECTOR_INDEX_NAME}', $top_k, $embedding) YIELD node AS i, score
             WHERE score >= $similarity_threshold
             MATCH (u)-[r:RELATES_TO]->(i)
-            WITH DISTINCT u.username AS username, r.value AS relationship, i.key AS key, i.value AS value, score
-            RETURN username, relationship, key, value, score
+            WITH DISTINCT u.username AS username, r.value AS relationship, i.key AS key, i.value AS value, i.createdAt AS created_at, r.lifetime AS lifetime, score
+            RETURN username, relationship, key, value, created_at, lifetime, score
+            ORDER BY score DESC
+            LIMIT $top_k
+        """
+
+        # Also search over relationships vector index
+        rel_query = f"""
+            MATCH (u:User {{username: $username}})
+            CALL db.index.vector.queryRelationships('{REL_VECTOR_INDEX_NAME}', $top_k, $embedding) YIELD relationship AS r, score
+            WHERE score >= $similarity_threshold
+            MATCH (u)-[r]->(i:Information)
+            WITH DISTINCT u.username AS username, r.value AS relationship, i.key AS key, i.value AS value, i.createdAt AS created_at, r.lifetime AS lifetime, score
+            RETURN username, relationship, key, value, created_at, lifetime, score
             ORDER BY score DESC
             LIMIT $top_k
         """
@@ -340,9 +368,13 @@ class Neo4jService:
                 "top_k": top_k,
                 "similarity_threshold": similarity_threshold
             }
-            # Create task to run the sync fetch list query in a thread
+            # Node-based vector search
             search_tasks.append(
                 asyncio.to_thread(_sync_fetch_list, driver, query, params=params)
+            )
+            # Relationship-based vector search
+            search_tasks.append(
+                asyncio.to_thread(_sync_fetch_list, driver, rel_query, params=params)
             )
         
         try:
@@ -370,7 +402,20 @@ class Neo4jService:
 
         sentences = []
         for record in processed_results.values():
-            sentence = f"You {record['relationship'].lower()} {record['value']} ({record['key']})."
+            created_at = record.get("created_at")
+            # convert timestamp in ms to ISO string
+            if isinstance(created_at, (int, float)):
+                try:
+                    created_iso = datetime.fromtimestamp(created_at / 1000).isoformat()
+                except Exception:
+                    created_iso = str(created_at)
+            else:
+                created_iso = str(created_at)
+            lifetime = record.get("lifetime", "")
+            sentence = (
+                f"You {record['relationship'].lower()} {record['value']} ({record['key']}), "
+                f"recorded at {created_iso}, lifetime {lifetime}."
+            )
             sentence = sentence[0].upper() + sentence[1:]
             sentences.append(sentence)
 
