@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import os 
 import asyncio
+from main import langfuse_handler
 
 load_dotenv()
 
@@ -33,5 +34,5 @@ async def llm_ask(question: str):
         prompt_obj = llm_chat_prompt.format_prompt(user_message=question)
         # convert ChatPromptTemplate messages to dicts
         messages = [{"role": msg.type, "content": msg.content} for msg in prompt_obj.messages]
-        response = await agent.ainvoke({"messages": messages})
+        response = await agent.ainvoke({"messages": messages}, config={"callbacks": [langfuse_handler]})
         return {"response": response} 

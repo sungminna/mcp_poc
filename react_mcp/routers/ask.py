@@ -62,7 +62,7 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
         extraction_result = await info_extraction_chain.ainvoke({
             "user_message": user_message,
             "format_instructions": info_parser.get_format_instructions()
-        })
+        }, config={"callbacks": [langfuse_handler]})
         extracted_info_list = extraction_result.get('information', [])
 
         if extracted_info_list:
@@ -84,7 +84,7 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
     augmentation_context = ""
     try:
         # 5. Extract Keywords
-        keyword_result = await keyword_extraction_chain.ainvoke({"user_message": user_message})
+        keyword_result = await keyword_extraction_chain.ainvoke({"user_message": user_message}, config={"callbacks": [langfuse_handler]})
         keywords_str = keyword_result.content
         keywords = [kw.strip() for kw in keywords_str.split(',') if kw.strip()]
         logger.info(f"Extracted keywords for user '{username}': {keywords}")
