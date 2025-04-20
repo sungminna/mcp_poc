@@ -1,7 +1,8 @@
 <script lang="ts">
     export let message: {
         id: number;
-        text: string;
+        text?: string;
+        content?: string;
         sender: 'user' | 'ai';
     };
     export let isLoading: boolean = false;
@@ -21,7 +22,7 @@
             <div class="dot-flashing"></div>
         {:else}
             <div class="message-content">
-                {message.text}
+                {message.text ?? message.content}
             </div>
         {/if}
     </div>

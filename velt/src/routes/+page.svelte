@@ -8,10 +8,14 @@
 
     type Message = {
         id: number;
-        text: string;
+        text?: string;
+        content?: string;
         sender: 'user' | 'ai';
     };
+    type Session = { id: number; created_at: string };
 
+    let sessions: Session[] = [];
+    let selectedSessionId: number | null = null;
     let messages: Message[] = [];
     let newMessageText: string = '';
     let loadingAIResponse = false;
@@ -19,44 +23,58 @@
     let chatWrapperElement: HTMLDivElement;
     let isAuthenticated = false;
 
+    async function fetchSessions() {
+        const token = localStorage.getItem('authToken');
+        const res = await fetch('/api/chat/sessions', { headers: { 'Authorization': `Bearer ${token}` } });
+        sessions = await res.json();
+    }
+
+    async function fetchMessages(sessionId: number) {
+        const token = localStorage.getItem('authToken');
+        const res = await fetch(`/api/chat/${sessionId}/messages`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await res.json();
+        // Map backend fields to Message type and align senders
+        messages = data.map((m: any) => ({
+            id: m.id,
+            text: m.content,
+            content: m.content,
+            sender: m.sender === 'human' ? 'user' : 'ai'
+        }));
+        await tick();
+        scrollToBottom();
+    }
+
     async function getAIResponse(inputText: string): Promise<string> {
         loadingAIResponse = true;
         const token = localStorage.getItem('authToken');
-        let aiResponse = '오류: AI 응답을 가져올 수 없습니다.'; // Default error response
+        let aiResponse = '오류: AI 응답을 가져올 수 없습니다.';
 
-        // If not authenticated, provide a specific message or handle as needed
         if (!token) {
-             loadingAIResponse = false;
-            // Option 1: Return an error message
-            // return '오류: 채팅 기능을 사용하려면 로그인이 필요합니다.';
-            // Option 2: Redirect to login (more user-friendly)
-            await goto('/login?redirectTo=/'); // Add redirectTo query param if needed
-            return ''; // Prevent further processing
+            loadingAIResponse = false;
+            await goto('/login?redirectTo=/');
+            return '';
         }
 
         try {
-            // Replace '/api/chat/' with your actual FastAPI chat endpoint
+            const body: any = { user_message: inputText };
+            if (selectedSessionId) body.session_id = selectedSessionId;
             const response = await fetch('/api/chat/', { 
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    // Include the JWT token in the Authorization header
                     'Authorization': `Bearer ${token}`,
                 },
-                // Send the user message in the expected format
-                body: JSON.stringify({ user_message: inputText }), 
+                body: JSON.stringify(body), 
             });
 
             if (response.status === 401) {
-                // Handle unauthorized access (e.g., token expired)
-                localStorage.removeItem('authToken'); // Clear invalid token
+                localStorage.removeItem('authToken');
                 isAuthenticated = false;
-                await goto('/login?sessionExpired=true'); // Redirect to login with a message
-                return ''; // Stop processing
+                await goto('/login?sessionExpired=true');
+                return '';
             }
 
             if (!response.ok) {
-                // Handle other API errors
                 let errorData = { detail: 'API 오류가 발생했습니다.' };
                 try {
                   errorData = await response.json();
@@ -66,9 +84,12 @@
 
             const data = await response.json();
             
-            // Extract the AI response from the expected field ('ai_response')
             if (data && data.ai_response) {
-                 aiResponse = data.ai_response;
+                if (!selectedSessionId && data.session_id) {
+                    selectedSessionId = data.session_id;
+                    await fetchSessions();
+                }
+                aiResponse = data.ai_response;
             } else {
                 console.error('Unexpected API response format:', data);
                 throw new Error('수신된 데이터 형식이 올바르지 않습니다.');
@@ -76,7 +97,6 @@
 
         } catch (error: any) {
             console.error('Failed to get AI response:', error);
-            // Use the error message caught or a default one
             aiResponse = error.message || 'AI 응답 처리 중 오류 발생'; 
         } finally {
             loadingAIResponse = false;
@@ -84,17 +104,14 @@
         return aiResponse;
     }
 
-    // Function to scroll the chat wrapper to the bottom smoothly
     async function scrollToBottom() {
-        await tick(); // Wait for DOM updates after message added
+        await tick();
         if (chatWrapperElement) {
-            // Smooth scroll to bottom
             chatWrapperElement.scrollTo({
                 top: chatWrapperElement.scrollHeight,
                 behavior: 'smooth'
             });
             
-            // Also set a timeout to ensure scroll happens after animation
             setTimeout(() => {
                 chatWrapperElement.scrollTo({
                     top: chatWrapperElement.scrollHeight,
@@ -108,25 +125,21 @@
         const text = newMessageText.trim();
         if (!text || loadingAIResponse) return;
 
-        // Add user message and scroll
-        messages = [...messages, { id: Date.now(), text, sender: 'user' }];
-        await tick(); // Ensure DOM updates before scrolling
-        scrollToBottom(); // <-- Scroll after user message
+        messages = [...messages, { id: Date.now(), text, content: text, sender: 'user' }];
+        await tick();
+        scrollToBottom();
 
         newMessageText = '';
         await tick();
         adjustTextareaHeight();
 
-        // Get AI response, add it, and scroll
-        const aiResponseText = await getAIResponse(text); // This now calls the real API
-        // Only add AI message if the response is not empty (e.g., not redirected)
+        const aiResponseText = await getAIResponse(text);
         if (aiResponseText) {
-            messages = [...messages, { id: Date.now() + 1, text: aiResponseText, sender: 'ai' }];
-            await tick(); // Wait for DOM to update with the new message
+            messages = [...messages, { id: Date.now() + 1, text: aiResponseText, content: aiResponseText, sender: 'ai' }];
+            await tick();
             
-            // Give extra time for transition animation to start
             setTimeout(() => {
-                scrollToBottom(); // <-- Scroll after AI message
+                scrollToBottom();
             }, 100);
         }
     }
@@ -150,76 +163,93 @@
         await goto('/login');
     }
 
-    onMount(() => {
+    onMount(async () => {
         const token = localStorage.getItem('authToken');
         isAuthenticated = !!token;
-
-        messages = [
-            { id: 1, text: 'ㅎㅇㅎㅇ! 궁금한거 물어봐줘? 😊', sender: 'ai' },
-        ];
-        adjustTextareaHeight();
-        scrollToBottom(); // <-- Scroll on initial load
+        await fetchSessions();
     });
 
 </script>
 
-<div class="chat-page-container">
-    <header class="chat-header">
-        <span class="header-title">Velt Chat</span>
-        {#if isAuthenticated}
-            <button on:click={handleLogout} class="auth-button logout-button">로그아웃</button>
-        {:else}
-            <div class="auth-buttons">
-                <a href="/login" class="auth-button login-button">로그인</a>
-                <a href="/signup" class="auth-button signup-button">회원가입</a>
+<div class="layout">
+    <aside class="sidebar">
+        <button on:click={() => { selectedSessionId = null; messages = []; }}>New Chat</button>
+        {#each sessions as sess}
+            <div class:selected={sess.id === selectedSessionId} on:click={() => { selectedSessionId = sess.id; fetchMessages(sess.id); }}>
+                Session {sess.id} — {new Date(sess.created_at).toLocaleString()}
             </div>
-        {/if}
-    </header>
-
-    <div class="chat-messages-wrapper" bind:this={chatWrapperElement}>
-        <div class="chat-messages">
-            {#each messages as message (message.id)}
-                <div transition:slide={{ duration: 300 }}>
-                     <ChatMessage {message} />
-                </div>
-            {/each}
-            {#if loadingAIResponse}
-                <div class="loading-indicator" transition:slide={{ duration: 300 }}>
-                    <ChatMessage message={{ id: -1, text: '...', sender: 'ai' }} isLoading={true}/>
+        {/each}
+    </aside>
+    <div class="chat-page-container">
+        <header class="chat-header">
+            <span class="header-title">Velt Chat</span>
+            {#if isAuthenticated}
+                <button on:click={handleLogout} class="auth-button logout-button">로그아웃</button>
+            {:else}
+                <div class="auth-buttons">
+                    <a href="/login" class="auth-button login-button">로그인</a>
+                    <a href="/signup" class="auth-button signup-button">회원가입</a>
                 </div>
             {/if}
-        </div>
-    </div>
+        </header>
 
-    <div class="chat-input-area">
-        <textarea
-            bind:this={textareaElement}
-            bind:value={newMessageText}
-            placeholder="무엇이든 물어보세요"
-            on:input={adjustTextareaHeight}
-            on:keydown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                }
-            }}
-            rows="1"
-        />
-        <button
-            class="send-button"
-            on:click={sendMessage}
-            disabled={!newMessageText.trim() || loadingAIResponse}
-            aria-label="Send message"
-        >
-            {@html sendIcon}
-        </button>
+        <div class="chat-messages-wrapper" bind:this={chatWrapperElement}>
+            <div class="chat-messages">
+                {#each messages as message (message.id)}
+                    <div transition:slide={{ duration: 300 }}>
+                         <ChatMessage {message} />
+                    </div>
+                {/each}
+                {#if loadingAIResponse}
+                    <div class="loading-indicator" transition:slide={{ duration: 300 }}>
+                        <ChatMessage message={{ id: -1, text: '...', sender: 'ai' }} isLoading={true}/>
+                    </div>
+                {/if}
+            </div>
+        </div>
+
+        <div class="chat-input-area">
+            <textarea
+                bind:this={textareaElement}
+                bind:value={newMessageText}
+                placeholder="무엇이든 물어보세요"
+                on:input={adjustTextareaHeight}
+                on:keydown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                }}
+                rows="1"
+            />
+            <button
+                class="send-button"
+                on:click={sendMessage}
+                disabled={!newMessageText.trim() || loadingAIResponse}
+                aria-label="Send message"
+            >
+                {@html sendIcon}
+            </button>
+        </div>
+        <footer class="chat-footer">
+            ChatGPT는 실수를 할 수 있습니다. 중요한 정보는 재차 확인하세요.
+        </footer>
     </div>
-    <footer class="chat-footer">
-        ChatGPT는 실수를 할 수 있습니다. 중요한 정보는 재차 확인하세요.
-    </footer>
 </div>
 
 <style>
+    .layout { display: flex; height: 100vh; }
+    .sidebar {
+        width: 240px;
+        border-right: 1px solid #e5e5e5;
+        padding: 10px;
+        overflow-y: auto;
+        flex-shrink: 0;
+    }
+    .sidebar button { width: 100%; margin-bottom: 8px; }
+    .sidebar div { padding: 6px; cursor: pointer; border-radius: 4px; }
+    .sidebar div.selected { background-color: #f0f0f0; }
+
     .chat-page-container {
         display: flex;
         flex-direction: column;

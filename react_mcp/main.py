@@ -10,6 +10,8 @@ from services.neo4j_service import neo4j_service # Import the Neo4j service inst
 from langfuse.callback import CallbackHandler
 import os
 
+import models.chat  # Register chat models so their tables are created
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,7 +41,7 @@ async def lifespan(app: FastAPI):
 
 
 # Create database tables (assuming this is for a relational DB like Postgres/SQLite)
-user_model.Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 load_dotenv()
 

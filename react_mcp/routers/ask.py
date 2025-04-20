@@ -2,11 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 import asyncio
 import logging
+from datetime import datetime
 
 from services.llm_service import llm_ask # The main REACT agent call
 from services.neo4j_service import neo4j_service
 from models.user import User # Assuming you have a User model for dependency
 from core.security import get_current_active_user # Function to get authenticated user
+from database import get_db
+from sqlalchemy.orm import Session
+from crud.chat import create_session, get_session, create_chat_message, get_sessions, get_messages, delete_session
+from main import langfuse_handler  # Import Langfuse callback handler
 
 # TODO: Import or define the LLM model instance used for extraction/keyword generation
 # from services.llm_service import model as extraction_model # Example if using the same model
@@ -14,7 +19,7 @@ from core.security import get_current_active_user # Function to get authenticate
 from langchain_openai import ChatOpenAI # Placeholder
 from langchain_core.output_parsers import JsonOutputParser # For structured output
 from .prompts import info_extraction_prompt, keyword_extraction_prompt
-from typing import List
+from typing import List, Optional
 
 # Placeholder: Define LLM for extraction/keywords if not using the main one
 # Make sure API keys are loaded via load_dotenv() in main.py or llm_service.py
@@ -45,14 +50,27 @@ keyword_extraction_chain = keyword_extraction_prompt | extraction_model # Output
 # --- Router Definition ---
 
 class ChatRequest(BaseModel):
+    session_id: Optional[int] = Field(None, description="ID of the chat session; if omitted, a new session will be created.")
     user_message: str
 
 @router.post("/api/chat/")
-async def ask(request: ChatRequest, current_user: User = Depends(get_current_active_user)):
+async def ask(request: ChatRequest, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     user_message = request.user_message
     username = current_user.username # Get username from authenticated user
 
     logger.info(f"Processing chat request for user: {username}")
+
+    # Handle chat session creation or retrieval
+    if request.session_id:
+        session = get_session(db, request.session_id)
+        if not session or session.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+    else:
+        session = create_session(db, current_user.id)
+    session_id = session.id
+
+    # Save user's message to the database
+    create_chat_message(db, session_id, "human", user_message)
 
     # --- Step 3 & 4: Extract Info & Save (Run in Background) ---
     extracted_info_list = []
@@ -124,23 +142,68 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
                      final_message = res['response']['messages'][-1].content
 
                 if final_message:
-                    logger.info(f"Successfully generated final response for user '{username}'")
-                    return {"question": user_message, "ai_response": final_message}
+                    logger.info(f"Successfully generated final response for user '{username}' in session {session_id}")
+                    # Save AI's response to the database
+                    create_chat_message(db, session_id, "agent", final_message)
+                    return {"session_id": session_id, "question": user_message, "ai_response": final_message}
                 else:
                     logger.error(f"Could not extract final message content from LLM response for user '{username}'. Response: {res['response']}")
-                    return {"question": user_message, "ai_response": "Error processing LLM response structure."}                    
+                    return {"session_id": session_id, "question": user_message, "ai_response": "Error processing LLM response structure."}                    
 
             except Exception as e:
                 logger.error(f"Error extracting content from LLM response for user '{username}': {e}. Response: {res['response']}", exc_info=True)
-                return {"question": user_message, "ai_response": "Error processing LLM response content."} 
+                return {"session_id": session_id, "question": user_message, "ai_response": "Error processing LLM response content."} 
 
         elif res and 'error' in res:
             logger.error(f"LLM Error for user '{username}': {res['error']}")
-            return {"question": user_message, "ai_response": f"LLM Error: {res['error']}"} 
+            return {"session_id": session_id, "question": user_message, "ai_response": f"LLM Error: {res['error']}"} 
         else:
             logger.error(f"Unknown LLM response structure for user '{username}': {res}")
-            return {"question": user_message, "ai_response": "Unknown error from LLM service."} 
+            return {"session_id": session_id, "question": user_message, "ai_response": "Unknown error from LLM service."} 
             
     except Exception as e:
         logger.error(f"Error calling main LLM agent for user '{username}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error generating AI response") 
+
+# --- Chat session management endpoints ---
+
+class SessionResponse(BaseModel):
+    id: int
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class MessageResponse(BaseModel):
+    id: int
+    session_id: int
+    sender: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+@router.get("/api/chat/sessions", response_model=List[SessionResponse], tags=["chat"])
+async def list_sessions(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """List all chat sessions for the current user"""
+    sessions = get_sessions(db, current_user.id)
+    return sessions
+
+@router.get("/api/chat/{session_id}/messages", response_model=List[MessageResponse], tags=["chat"])
+async def list_messages(session_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """Retrieve all messages for a given chat session"""
+    session = get_session(db, session_id)
+    if not session or session.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    messages = get_messages(db, session_id)
+    return messages
+
+@router.delete("/api/chat/{session_id}", status_code=204, tags=["chat"])
+async def remove_session(session_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """Delete a chat session and its messages"""
+    session = get_session(db, session_id)
+    if not session or session.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    delete_session(db, session_id)
+    return 
