@@ -13,7 +13,7 @@ from core.security import get_current_active_user # Function to get authenticate
 # Or use a dedicated model/client for these tasks
 from langchain_openai import ChatOpenAI # Placeholder
 from langchain_core.output_parsers import JsonOutputParser # For structured output
-from langchain_core.prompts import ChatPromptTemplate
+from .prompts import info_extraction_prompt, keyword_extraction_prompt
 from typing import List
 
 # Placeholder: Define LLM for extraction/keywords if not using the main one
@@ -37,17 +37,9 @@ class ExtractedInfoList(BaseModel):
 
 # 1. Information Extraction Chain
 info_parser = JsonOutputParser(pydantic_object=ExtractedInfoList)
-info_extraction_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an expert personal information extractor. Analyze the user's message and identify any personal preferences, attributes, or statements. Extract them into a JSON object following this format:\n{format_instructions}\nIf no personal information is found, return an empty list."),
-    ("human", "User message: {user_message}")
-])
 info_extraction_chain = info_extraction_prompt | extraction_model | info_parser
 
 # 2. Keyword Extraction Chain
-keyword_extraction_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an expert keyword extractor. Identify the main nouns, verbs, and adjectives from the user's message that represent the core topics or entities being discussed. Return them as a comma-separated string."),
-    ("human", "User message: {user_message}")
-])
 keyword_extraction_chain = keyword_extraction_prompt | extraction_model # Output is AIMessage, get content
 
 # --- Router Definition ---
