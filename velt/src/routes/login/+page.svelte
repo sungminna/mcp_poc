@@ -198,14 +198,14 @@
 
     .form-group input:focus {
         outline: none;
-        border-color: #FFD66E;
+        border-color: #3BD66A;
         box-shadow: none;
     }
 
     .submit-button {
         padding: 14px 20px;
         border: none;
-        background-color: #FFD66E;
+        background-color: #3BD66A;
         color: #131316;
         border-radius: 6px;
         cursor: pointer;
@@ -217,7 +217,7 @@
     }
 
     .submit-button:hover:not(:disabled) {
-        background-color: #e6c850;
+        background-color: #2AA05A;
     }
 
     .submit-button:disabled {
@@ -244,7 +244,7 @@
     }
 
     .link-section a {
-        color: #FFD66E;
+        color: #3BD66A;
         text-decoration: none;
         font-weight: 500;
     }

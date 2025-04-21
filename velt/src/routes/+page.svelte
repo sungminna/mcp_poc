@@ -389,12 +389,19 @@
     }
 
     .login-button {
-        background-color: #e7f3ff;
-        color: #007bff;
-        border-color: #cfe2ff;
+        background-color: #3BD66A;
+        color: #131316;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: 500;
+        margin-left: 12px;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
     }
     .login-button:hover {
-        background-color: #cfe2ff;
+        background-color: #2AA05A;
     }
 
     .signup-button {
@@ -466,6 +473,9 @@
         padding: 4px;
         cursor: pointer;
     }
+    .action-button:not(:disabled) {
+        color: #3BD66A;
+    }
     .action-button:disabled {
         color: #555;
         cursor: not-allowed;
@@ -525,11 +535,11 @@
     }
 
     .delete-button:hover {
-        color: #e53935;
+        color: #3BD66A;
     }
 
     .new-chat {
-        background-color: #007bff;
+        background-color: #3BD66A;
         color: white;
         border: none;
         padding: 8px;
@@ -539,7 +549,7 @@
         margin-bottom: 12px;
     }
     .new-chat:hover {
-        background-color: #0056b3;
+        background-color: #2AA05A;
     }
 
     .spinner {
@@ -579,16 +589,12 @@
     }
 
     /* Login/logout button style */
-    .login-button {
-        background: transparent;
-        border: none;
-        color: #FFF;
-        font-size: 14px;
-        margin-left: 12px;
-        cursor: pointer;
+    .login-button:focus {
+        outline: none;
+        box-shadow: none;
     }
-    .login-button:hover {
-        text-decoration: underline;
+    .login-button:focus-visible {
+        outline: none;
     }
 
 </style>

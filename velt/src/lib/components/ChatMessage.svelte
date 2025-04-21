@@ -57,7 +57,7 @@
     }
 
     .user-message {
-        background-color: #FFD66E;
+        background-color: #3BD66A;
         color: #000;
     }
 
@@ -133,9 +133,14 @@
 
     .timestamp {
         font-size: 0.7rem;
-        color: #888;
+        color: #555; /* user timestamp color */
         margin-top: 4px;
         align-self: flex-end;
+    }
+
+    /* AI bubble timestamp color */
+    .message-wrapper.ai .timestamp {
+        color: #888;
     }
 
 </style> 
