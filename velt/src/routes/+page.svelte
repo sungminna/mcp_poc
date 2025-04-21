@@ -30,7 +30,10 @@
     let sessionsLoading: boolean = false;
     let messagesLoading: boolean = false;
     let groupedMessages: Array<{ type: 'date'; date: string } | { type: 'message'; message: Message }> = [];
-    let groupTitle = selectedSessionId ? `Session ${selectedSessionId}` : '새로운 채팅';
+    let groupTitle = '새로운 채팅';
+
+    // Update header title based on selected session
+    $: groupTitle = selectedSessionId != null ? `Session ${selectedSessionId}` : '새로운 채팅';
 
     // After each update, if loading, scroll down so the loading bubble is visible
     afterUpdate(() => {
@@ -297,18 +300,16 @@
 
         <div class="chat-input-area">
             <div class="textarea-container">
-                <textarea
-                    bind:this={textareaElement}
+                <input
+                    type="text"
                     bind:value={newMessageText}
                     placeholder="메시지 입력"
-                    on:input={adjustTextareaHeight}
                     on:keydown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === 'Enter') {
                             e.preventDefault();
                             sendMessage();
                         }
                     }}
-                    rows="1"
                 />
             </div>
             <button class="icon-button action-button" on:click={sendMessage} disabled={!newMessageText.trim() || loadingAIResponse} aria-label="Send">{@html sendIcon}</button>
@@ -452,18 +453,23 @@
         background-color: #2A2A2A;
         border-radius: 20px;
         margin: 0 8px;
-        padding: 4px 12px;
+        padding: 0 12px;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
     }
-    .textarea-container textarea {
+    .textarea-container input {
         width: 100%;
         background: transparent;
         border: none;
         color: #FFF;
-        resize: none;
-        outline: none;
         font-size: 14px;
+        padding: 8px 0;
+        box-sizing: border-box;
+        outline: none;
+        margin: 0;
     }
-    .textarea-container textarea:focus {
+    .textarea-container input:focus {
         outline: none;
         box-shadow: none;
     }
