@@ -4,6 +4,7 @@
         text?: string;
         content?: string;
         sender: 'user' | 'ai';
+        timestamp: number;
     };
     export let isLoading: boolean = false;
 
@@ -23,6 +24,9 @@
         {:else}
             <div class="message-content">
                 {message.text ?? message.content}
+            </div>
+            <div class="timestamp">
+                {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
             </div>
         {/if}
     </div>
@@ -54,7 +58,7 @@
     }
 
     .user-message {
-        background-color: #f0f0f0; /* Light gray for user */
+        background-color: #dcf8c6; /* Light green for user */
         color: #000000; /* Black text for user */
         /* align-self: flex-end; Already handled by wrapper */
         border-bottom-right-radius: 8px; /* Match image corner */
@@ -62,10 +66,9 @@
     }
 
     .ai-message {
-        background-color: #ffffff; /* White for AI */
+        background-color: #e7f3ff; /* Light blue for AI */
         color: #000000; /* Black text for AI */
-        /* align-self: flex-start; Already handled by wrapper */
-        border: 1px solid #e5e5e5; /* Subtle border for AI bubble */
+        border: 1px solid #cfe2ff; /* Subtle border for AI bubble */
         border-bottom-left-radius: 8px; /* Match image corner */
         /* margin-right: auto; Already handled by wrapper */
     }
@@ -133,6 +136,39 @@
         50%, 100% {
             background-color: rgba(160, 160, 160, 0.3);
         }
+    }
+
+    /* Speech bubble tails */
+    .user-message::after {
+        content: "";
+        position: absolute;
+        right: -10px;
+        bottom: 16px;
+        border-top: 8px solid transparent;
+        border-left: 10px solid #dcf8c6;
+        border-bottom: 8px solid transparent;
+    }
+    .ai-message::before {
+        content: "";
+        position: absolute;
+        left: -10px;
+        bottom: 16px;
+        border-top: 8px solid transparent;
+        border-right: 10px solid #e7f3ff;
+        border-bottom: 8px solid transparent;
+    }
+
+    .timestamp {
+        font-size: 0.7rem;
+        color: #888;
+        margin-top: 4px;
+        align-self: flex-end;
+    }
+
+    /* Hide pointer on loading bubble */
+    .message-bubble.loading.ai-message::before,
+    .message-bubble.loading.user-message::after {
+        display: none;
     }
 
 </style> 

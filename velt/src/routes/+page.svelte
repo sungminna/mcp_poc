@@ -1,6 +1,6 @@
 <script lang="ts">
     import ChatMessage from '$lib/components/ChatMessage.svelte';
-    import { onMount, tick } from 'svelte';
+    import { onMount, afterUpdate, tick } from 'svelte';
     import { slide } from 'svelte/transition';
     import { goto } from '$app/navigation';
 
@@ -11,6 +11,7 @@
         text?: string;
         content?: string;
         sender: 'user' | 'ai';
+        timestamp: string;
     };
     type Session = { id: number; created_at: string };
 
@@ -22,30 +23,59 @@
     let textareaElement: HTMLTextAreaElement;
     let chatWrapperElement: HTMLDivElement;
     let isAuthenticated = false;
+    let errorMessage: string = '';
+    let sessionsLoading: boolean = false;
+    let messagesLoading: boolean = false;
+    let groupedMessages: Array<{ type: 'date'; date: string } | { type: 'message'; message: Message }> = [];
+
+    // After each update, if loading, scroll down so the loading bubble is visible
+    afterUpdate(() => {
+        if (loadingAIResponse) scrollToBottom();
+    });
 
     async function fetchSessions() {
-        const token = localStorage.getItem('authToken');
-        const res = await fetch('/api/chat/sessions', { headers: { 'Authorization': `Bearer ${token}` } });
-        sessions = await res.json();
+        sessionsLoading = true;
+        errorMessage = '';
+        try {
+            const token = localStorage.getItem('authToken');
+            const res = await fetch('/api/chat/sessions', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!res.ok) throw new Error('세션 목록을 가져오는데 실패했습니다.');
+            sessions = await res.json();
+        } catch (err: any) {
+            errorMessage = err.message;
+        } finally {
+            sessionsLoading = false;
+        }
     }
 
     async function fetchMessages(sessionId: number) {
-        const token = localStorage.getItem('authToken');
-        const res = await fetch(`/api/chat/${sessionId}/messages`, { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await res.json();
-        // Map backend fields to Message type and align senders
-        messages = data.map((m: any) => ({
-            id: m.id,
-            text: m.content,
-            content: m.content,
-            sender: m.sender === 'human' ? 'user' : 'ai'
-        }));
+        messagesLoading = true;
+        errorMessage = '';
+        try {
+            const token = localStorage.getItem('authToken');
+            const res = await fetch(`/api/chat/${sessionId}/messages`, { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!res.ok) throw new Error('메시지 목록을 가져오는데 실패했습니다.');
+            const data = await res.json();
+            messages = data.map((m: any) => ({
+                id: m.id,
+                text: m.content,
+                content: m.content,
+                sender: m.sender === 'human' ? 'user' : 'ai',
+                timestamp: m.created_at
+            }));
+        } catch (err: any) {
+            errorMessage = err.message;
+        } finally {
+            messagesLoading = false;
+        }
         await tick();
         scrollToBottom();
     }
 
     async function getAIResponse(inputText: string): Promise<string> {
         loadingAIResponse = true;
+        await tick();
+        scrollToBottom();
         const token = localStorage.getItem('authToken');
         let aiResponse = '오류: AI 응답을 가져올 수 없습니다.';
 
@@ -97,7 +127,8 @@
 
         } catch (error: any) {
             console.error('Failed to get AI response:', error);
-            aiResponse = error.message || 'AI 응답 처리 중 오류 발생'; 
+            errorMessage = error.message || 'AI 응답 처리 중 오류 발생';
+            aiResponse = errorMessage; 
         } finally {
             loadingAIResponse = false;
         }
@@ -125,7 +156,7 @@
         const text = newMessageText.trim();
         if (!text || loadingAIResponse) return;
 
-        messages = [...messages, { id: Date.now(), text, content: text, sender: 'user' }];
+        messages = [...messages, { id: Date.now(), text, content: text, sender: 'user', timestamp: new Date().toISOString() }];
         await tick();
         scrollToBottom();
 
@@ -135,7 +166,7 @@
 
         const aiResponseText = await getAIResponse(text);
         if (aiResponseText) {
-            messages = [...messages, { id: Date.now() + 1, text: aiResponseText, content: aiResponseText, sender: 'ai' }];
+            messages = [...messages, { id: Date.now() + 1, text: aiResponseText, content: aiResponseText, sender: 'ai', timestamp: new Date().toISOString() }];
             await tick();
             
             setTimeout(() => {
@@ -163,22 +194,59 @@
         await goto('/login');
     }
 
+    async function deleteChatSession(sessionId: number) {
+        const token = localStorage.getItem('authToken');
+        try {
+            const res = await fetch(`/api/chat/${sessionId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!res.ok) throw new Error('세션 삭제에 실패했습니다.');
+            sessions = sessions.filter(s => s.id !== sessionId);
+            if (selectedSessionId === sessionId) {
+                selectedSessionId = null;
+                messages = [];
+            }
+        } catch (err: any) {
+            errorMessage = err.message;
+        }
+    }
+
+    $: {
+        let lastDate = '';
+        groupedMessages = [];
+        for (const m of messages) {
+            const dateStr = new Date(m.timestamp).toLocaleDateString();
+            if (dateStr !== lastDate) {
+                groupedMessages.push({ type: 'date', date: dateStr });
+                lastDate = dateStr;
+            }
+            groupedMessages.push({ type: 'message', message: m });
+        }
+    }
+
     onMount(async () => {
         const token = localStorage.getItem('authToken');
         isAuthenticated = !!token;
         await fetchSessions();
+        if (textareaElement) textareaElement.focus();
     });
 
 </script>
 
 <div class="layout">
     <aside class="sidebar">
-        <button on:click={() => { selectedSessionId = null; messages = []; }}>New Chat</button>
+        <button class="new-chat" on:click={() => { selectedSessionId = null; messages = []; }}>New Chat</button>
+        {#if sessionsLoading}
+            <div class="sidebar-spinner"><div class="spinner"></div></div>
+        {:else}
         {#each sessions as sess}
-            <div class:selected={sess.id === selectedSessionId} on:click={() => { selectedSessionId = sess.id; fetchMessages(sess.id); }}>
-                Session {sess.id} — {new Date(sess.created_at).toLocaleString()}
+            <div class="session-item {sess.id === selectedSessionId ? 'selected' : ''}" on:click={() => { selectedSessionId = sess.id; fetchMessages(sess.id); }}>
+                <span class="session-title">Session {sess.id} — {new Date(sess.created_at).toLocaleString()}</span>
+                <button class="delete-button" on:click={(e) => { e.stopPropagation(); deleteChatSession(sess.id); }} aria-label="Delete session">삭제</button>
             </div>
         {/each}
+        {/if}
     </aside>
     <div class="chat-page-container">
         <header class="chat-header">
@@ -193,19 +261,29 @@
             {/if}
         </header>
 
+        {#if errorMessage}
+            <div class="error-banner">{errorMessage}</div>
+        {/if}
+
         <div class="chat-messages-wrapper" bind:this={chatWrapperElement}>
+            {#if messagesLoading}
+                <div class="messages-loading"><div class="spinner"></div></div>
+            {:else}
             <div class="chat-messages">
-                {#each messages as message (message.id)}
-                    <div transition:slide={{ duration: 300 }}>
-                         <ChatMessage {message} />
-                    </div>
+                {#each groupedMessages as item, idx}
+                    {#if item.type === 'date'}
+                        <div class="date-sep">{item.date}</div>
+                    {:else}
+                        <div transition:slide={{ duration: 300 }}>
+                            <ChatMessage message={item.message} />
+                        </div>
+                    {/if}
                 {/each}
                 {#if loadingAIResponse}
-                    <div class="loading-indicator" transition:slide={{ duration: 300 }}>
-                        <ChatMessage message={{ id: -1, text: '...', sender: 'ai' }} isLoading={true}/>
-                    </div>
+                    <ChatMessage message={{ id: -1, text: '...', sender: 'ai', timestamp: new Date().toISOString() }} isLoading={true}/>
                 {/if}
             </div>
+            {/if}
         </div>
 
         <div class="chat-input-area">
@@ -245,6 +323,7 @@
         padding: 10px;
         overflow-y: auto;
         flex-shrink: 0;
+        background-color: #fafafa;
     }
     .sidebar button { width: 100%; margin-bottom: 8px; }
     .sidebar div { padding: 6px; cursor: pointer; border-radius: 4px; }
@@ -410,10 +489,92 @@
         border-top: 1px solid #f0f0f0; /* Subtle border */
     }
 
+    /* Align loading bubble like AI messages */
     .loading-indicator {
-      opacity: 0.7;
-      align-self: flex-start; /* Align loading indicator like AI messages */
-      margin-right: auto; /* Push to the left */
+        display: flex;
+        justify-content: flex-start;
+        padding: 0;
+        margin-bottom: 18px; /* match gap between messages */
+    }
+
+    /* Error banner and sidebar session styles */
+    .error-banner {
+        background-color: #fdecea;
+        color: #b71c1c;
+        padding: 8px 16px;
+        margin: 0 20px 10px;
+        border-radius: 4px;
+        text-align: center;
+    }
+
+    .session-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    .session-item.selected {
+        background-color: #e0e0e0;
+    }
+
+    .session-item:hover {
+        background-color: #f5f5f5;
+    }
+
+    .delete-button {
+        background: transparent;
+        border: none;
+        color: #888;
+        cursor: pointer;
+        font-size: 14px;
+        padding: 4px;
+    }
+
+    .delete-button:hover {
+        color: #e53935;
+    }
+
+    .new-chat {
+        background-color: #007bff;
+        color: white;
+        border: none;
+        padding: 8px;
+        border-radius: 4px;
+        font-weight: 500;
+        cursor: pointer;
+        margin-bottom: 12px;
+    }
+    .new-chat:hover {
+        background-color: #0056b3;
+    }
+
+    /* Spinner styles */
+    .spinner {
+        border: 4px solid rgba(0,0,0,0.1);
+        border-top-color: #007bff;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        animation: spin 1s linear infinite;
+        margin: auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .sidebar-spinner, .messages-loading {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+    }
+
+    .date-sep {
+        text-align: center;
+        margin: 12px 0;
+        font-size: 0.8rem;
+        color: #888;
     }
 
 </style>
