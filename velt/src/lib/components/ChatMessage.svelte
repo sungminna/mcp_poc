@@ -46,31 +46,24 @@
     }
 
     .message-bubble {
-        padding: 12px 18px; /* Slightly larger padding */
-        border-radius: 22px; /* More rounded */
-        max-width: 80%; /* Adjusted max width */
+        padding: 10px 14px;
+        border-radius: 16px;
+        max-width: 75%;
         word-wrap: break-word;
-        line-height: 1.5;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); /* Subtle shadow */
+        line-height: 1.4;
         position: relative;
-        display: flex; /* Use flex for content and actions */
-        flex-direction: column; /* Stack content and actions vertically */
+        display: flex;
+        flex-direction: column;
     }
 
     .user-message {
-        background-color: #dcf8c6; /* Light green for user */
-        color: #000000; /* Black text for user */
-        /* align-self: flex-end; Already handled by wrapper */
-        border-bottom-right-radius: 8px; /* Match image corner */
-        /* margin-left: auto; Already handled by wrapper */
+        background-color: #FFD66E;
+        color: #000;
     }
 
     .ai-message {
-        background-color: #e7f3ff; /* Light blue for AI */
-        color: #000000; /* Black text for AI */
-        border: 1px solid #cfe2ff; /* Subtle border for AI bubble */
-        border-bottom-left-radius: 8px; /* Match image corner */
-        /* margin-right: auto; Already handled by wrapper */
+        background-color: #3B3B3B;
+        color: #fff;
     }
 
     .message-content {
@@ -138,37 +131,11 @@
         }
     }
 
-    /* Speech bubble tails */
-    .user-message::after {
-        content: "";
-        position: absolute;
-        right: -10px;
-        bottom: 16px;
-        border-top: 8px solid transparent;
-        border-left: 10px solid #dcf8c6;
-        border-bottom: 8px solid transparent;
-    }
-    .ai-message::before {
-        content: "";
-        position: absolute;
-        left: -10px;
-        bottom: 16px;
-        border-top: 8px solid transparent;
-        border-right: 10px solid #e7f3ff;
-        border-bottom: 8px solid transparent;
-    }
-
     .timestamp {
         font-size: 0.7rem;
         color: #888;
         margin-top: 4px;
         align-self: flex-end;
-    }
-
-    /* Hide pointer on loading bubble */
-    .message-bubble.loading.ai-message::before,
-    .message-bubble.loading.user-message::after {
-        display: none;
     }
 
 </style> 

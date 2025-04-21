@@ -5,6 +5,9 @@
     import { goto } from '$app/navigation';
 
     const sendIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" /></svg>`;
+    const backIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>`;
+    const searchIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" width="24" height="24"><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/></svg>`;
+    const menuIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><circle cx="12" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg>`;
 
     type Message = {
         id: number;
@@ -27,6 +30,7 @@
     let sessionsLoading: boolean = false;
     let messagesLoading: boolean = false;
     let groupedMessages: Array<{ type: 'date'; date: string } | { type: 'message'; message: Message }> = [];
+    let groupTitle = selectedSessionId ? `Session ${selectedSessionId}` : '새로운 채팅';
 
     // After each update, if loading, scroll down so the loading bubble is visible
     afterUpdate(() => {
@@ -250,15 +254,17 @@
     </aside>
     <div class="chat-page-container">
         <header class="chat-header">
-            <span class="header-title">Velt Chat</span>
-            {#if isAuthenticated}
-                <button on:click={handleLogout} class="auth-button logout-button">로그아웃</button>
-            {:else}
-                <div class="auth-buttons">
-                    <a href="/login" class="auth-button login-button">로그인</a>
-                    <a href="/signup" class="auth-button signup-button">회원가입</a>
-                </div>
-            {/if}
+            <div class="header-left">
+                <button class="icon-button back-button" aria-label="Back">{@html backIcon}</button>
+                <span class="header-title">{groupTitle}</span>
+            </div>
+            <div class="header-right">
+                {#if isAuthenticated}
+                    <button class="icon-button login-button" on:click={handleLogout}>로그아웃</button>
+                {:else}
+                    <button class="icon-button login-button" on:click={() => goto('/login')}>로그인</button>
+                {/if}
+            </div>
         </header>
 
         {#if errorMessage}
@@ -287,27 +293,22 @@
         </div>
 
         <div class="chat-input-area">
-            <textarea
-                bind:this={textareaElement}
-                bind:value={newMessageText}
-                placeholder="무엇이든 물어보세요"
-                on:input={adjustTextareaHeight}
-                on:keydown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                    }
-                }}
-                rows="1"
-            />
-            <button
-                class="send-button"
-                on:click={sendMessage}
-                disabled={!newMessageText.trim() || loadingAIResponse}
-                aria-label="Send message"
-            >
-                {@html sendIcon}
-            </button>
+            <div class="textarea-container">
+                <textarea
+                    bind:this={textareaElement}
+                    bind:value={newMessageText}
+                    placeholder="메시지 입력"
+                    on:input={adjustTextareaHeight}
+                    on:keydown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendMessage();
+                        }
+                    }}
+                    rows="1"
+                />
+            </div>
+            <button class="icon-button action-button" on:click={sendMessage} disabled={!newMessageText.trim() || loadingAIResponse} aria-label="Send">{@html sendIcon}</button>
         </div>
         <footer class="chat-footer">
             ChatGPT는 실수를 할 수 있습니다. 중요한 정보는 재차 확인하세요.
@@ -319,51 +320,66 @@
     .layout { display: flex; height: 100vh; }
     .sidebar {
         width: 240px;
-        border-right: 1px solid #e5e5e5;
+        border-right: 1px solid #222;
         padding: 10px;
         overflow-y: auto;
         flex-shrink: 0;
-        background-color: #fafafa;
+        background-color: #1E1E1F;
+        color: #EEE;
     }
-    .sidebar button { width: 100%; margin-bottom: 8px; }
-    .sidebar div { padding: 6px; cursor: pointer; border-radius: 4px; }
-    .sidebar div.selected { background-color: #f0f0f0; }
+    .sidebar button { width: 100%; margin-bottom: 8px; color: #EEE; background: #2A2A2A; border: none; }
+    .sidebar div { padding: 6px; cursor: pointer; border-radius: 4px; color: #EEE; }
+    .sidebar div.selected { background-color: #333; }
+    .sidebar div:hover { background-color: #2A2A2A; }
 
     .chat-page-container {
         display: flex;
         flex-direction: column;
-        height: 100vh; /* Full viewport height */
-        width: 100%; /* Full width */
-        margin: 0; /* Remove margin */
-        background-color: #ffffff; /* White background like image */
-        overflow: hidden; /* Prevent content spill */
+        height: 100vh;
+        width: 100%;
+        margin: 0;
+        background-color: #131316;
+        overflow: hidden;
     }
 
     .chat-header {
-        padding: 10px 20px;
-        display: flex; /* Use flexbox for layout */
-        justify-content: space-between; /* Space out title and buttons */
-        align-items: center; /* Vertically align items */
-        font-size: 1rem;
-        color: #333; /* Darker header text */
-        border-bottom: 1px solid #e5e5e5; /* Slightly darker border */
-        background-color: #ffffff;
-        flex-shrink: 0; /* Prevent header from shrinking */
-        position: relative; /* Needed for potential absolute positioning inside */
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px;
+        background-color: #1E1E1F;
+        color: #FFF;
+        flex-shrink: 0;
     }
-
+    .header-left,
+    .header-right {
+        display: flex;
+        align-items: center;
+    }
+    .header-right {
+        gap: 12px;
+    }
+    .icon-button {
+        background: transparent;
+        border: none;
+        color: inherit;
+        padding: 4px;
+        cursor: pointer;
+    }
     .header-title {
+        margin-left: 8px;
+        font-size: 16px;
         font-weight: 600;
     }
 
     .auth-buttons {
         display: flex;
-        gap: 10px; /* Space between buttons */
+        gap: 10px;
     }
 
     .auth-button {
         padding: 6px 12px;
-        border: 1px solid transparent; /* Base border */
+        border: 1px solid transparent;
         border-radius: 6px;
         text-decoration: none;
         font-size: 0.85rem;
@@ -373,16 +389,16 @@
     }
 
     .login-button {
-        background-color: #e7f3ff; /* Light blue background */
-        color: #007bff; /* Blue text */
-        border-color: #cfe2ff; /* Subtle blue border */
+        background-color: #e7f3ff;
+        color: #007bff;
+        border-color: #cfe2ff;
     }
     .login-button:hover {
         background-color: #cfe2ff;
     }
 
     .signup-button {
-        background-color: #007bff; /* Blue background */
+        background-color: #007bff;
         color: white;
     }
     .signup-button:hover {
@@ -390,114 +406,88 @@
     }
 
     .logout-button {
-        background-color: #f8d7da; /* Light red background */
-        color: #721c24; /* Dark red text */
-        border-color: #f5c6cb; /* Subtle red border */
+        background-color: #f8d7da;
+        color: #721c24;
+        border-color: #f5c6cb;
     }
     .logout-button:hover {
         background-color: #f5c6cb;
     }
 
-    /* Added wrapper for messages padding */
     .chat-messages-wrapper {
         flex-grow: 1;
         overflow-y: auto;
-        padding: 20px 20px 0 20px; /* Add padding top/sides, no bottom */
+        padding: 20px;
+        background-color: #131316;
     }
 
     .chat-messages {
         display: flex;
         flex-direction: column;
-        gap: 18px; /* Slightly increased gap */
-        height: 100%; /* Ensure it tries to fill wrapper */
-        padding-bottom: 20px; /* Padding at the very bottom */
+        gap: 18px;
+        height: 100%;
+        padding-bottom: 20px;
     }
 
     .chat-input-area {
         display: flex;
-        align-items: flex-end; /* Align items to bottom for multi-line */
-        padding: 12px 15px; /* Adjusted padding */
-        border-top: 1px solid #f0f0f0; /* Subtle border */
-        background-color: #ffffff; /* White background */
-        flex-shrink: 0; /* Prevent input area from shrinking */
-    }
-
-    textarea {
-        flex-grow: 1;
-        padding: 10px 15px;
-        border: 1px solid #e0e0e0; /* Lighter border */
-        border-radius: 18px; /* More rounded */
-        resize: none;
-        min-height: 40px; /* Adjusted minimum height */
-        max-height: 120px;
-        line-height: 1.4;
-        font-size: 0.95rem;
-        margin-right: 10px;
-        overflow-y: hidden; /* Hide vertical scrollbar */
-        background-color: #f7f7f7; /* Light gray background for textarea */
-        transition: border-color 0.2s ease-in-out, background-color 0.2s ease-in-out;
-        box-sizing: border-box; /* Include padding/border in height */
-    }
-
-    textarea:focus {
-        outline: none;
-        border-color: #c0c0c0;
-        background-color: #ffffff;
-        box-shadow: none; /* Remove default blue shadow */
-    }
-
-    /* Send button styling */
-    .send-button {
-        display: flex;
         align-items: center;
-        justify-content: center;
-        padding: 0; /* Remove padding, control size with width/height */
+        padding: 8px 12px;
+        background-color: #1E1E1F;
+        flex-shrink: 0;
+    }
+
+    .textarea-container {
+        flex-grow: 1;
+        background-color: #2A2A2A;
+        border-radius: 20px;
+        margin: 0 8px;
+        padding: 4px 12px;
+    }
+    .textarea-container textarea {
+        width: 100%;
+        background: transparent;
         border: none;
-        background-color: #e0e0e0; /* Default gray background */
-        color: #8e8e8e; /* Icon color */
-        border-radius: 50%; /* Make it circular */
-        width: 38px; /* Fixed size */
-        height: 38px; /* Fixed size */
+        color: #FFF;
+        resize: none;
+        outline: none;
+        font-size: 14px;
+    }
+    .textarea-container textarea:focus {
+        outline: none;
+        box-shadow: none;
+    }
+
+    .action-button {
+        background: transparent;
+        border: none;
+        color: #999;
+        font-size: 20px;
+        padding: 4px;
         cursor: pointer;
-        transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
-        flex-shrink: 0; /* Prevent shrinking */
     }
-
-    .send-button:not(:disabled) {
-        background-color: #000000; /* Black background when active */
-        color: #ffffff; /* White icon */
-    }
-
-    .send-button:disabled {
-        background-color: #f0f0f0; /* Lighter gray when disabled */
-        color: #b0b0b0;
+    .action-button:disabled {
+        color: #555;
         cursor: not-allowed;
-    }
-
-    .send-button svg {
-        width: 20px; /* Icon size */
-        height: 20px;
     }
 
     .chat-footer {
         padding: 8px 20px;
         text-align: center;
         font-size: 0.7rem;
-        color: #b0b0b0; /* Lighter gray */
+        color: #b0b0b0;
         background-color: #ffffff;
-        flex-shrink: 0; /* Prevent footer from shrinking */
-        border-top: 1px solid #f0f0f0; /* Subtle border */
+        flex-shrink: 0;
+        border-top: 1px solid #f0f0f0;
     }
 
-    /* Align loading bubble like AI messages */
     .loading-indicator {
         display: flex;
         justify-content: flex-start;
         padding: 0;
-        margin-bottom: 18px; /* match gap between messages */
+        margin-bottom: 18px;
     }
 
-    /* Error banner and sidebar session styles */
     .error-banner {
         background-color: #fdecea;
         color: #b71c1c;
@@ -530,7 +520,8 @@
         color: #888;
         cursor: pointer;
         font-size: 14px;
-        padding: 4px;
+        padding: 6px 12px;
+        border-radius: 4px;
     }
 
     .delete-button:hover {
@@ -551,7 +542,6 @@
         background-color: #0056b3;
     }
 
-    /* Spinner styles */
     .spinner {
         border: 4px solid rgba(0,0,0,0.1);
         border-top-color: #007bff;
@@ -571,10 +561,34 @@
     }
 
     .date-sep {
+        display: inline-block;
+        background-color: #2A2A2A;
+        color: #CCC;
+        padding: 4px 12px;
+        border-radius: 12px;
         text-align: center;
-        margin: 12px 0;
+        margin: 12px auto;
         font-size: 0.8rem;
+    }
+
+    /* Darken chat footer */
+    .chat-footer {
+        background-color: #1E1E1F;
         color: #888;
+        border-top: 1px solid #222;
+    }
+
+    /* Login/logout button style */
+    .login-button {
+        background: transparent;
+        border: none;
+        color: #FFF;
+        font-size: 14px;
+        margin-left: 12px;
+        cursor: pointer;
+    }
+    .login-button:hover {
+        text-decoration: underline;
     }
 
 </style>

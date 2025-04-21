@@ -117,9 +117,8 @@
 </div>
 
 <style>
-    /* Styles are very similar to signup page. Consider sharing styles. */
     :global(body) {
-        background-color: #f0f2f5;
+        background-color: #131316;
         margin: 0;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
     }
@@ -133,15 +132,16 @@
         align-items: center;
         padding: 20px;
         box-sizing: border-box;
+        background-color: #131316;
     }
 
     .auth-box {
         width: 100%;
         max-width: 400px;
-        background-color: #ffffff;
+        background-color: #1E1E1F;
         padding: 35px 40px;
         border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
         margin-bottom: 50px; 
     }
 
@@ -149,19 +149,19 @@
         text-align: center;
         font-size: 1.6rem;
         font-weight: 600;
-        color: #1c1e21;
+        color: #FFF;
         margin-bottom: 30px;
     }
 
      .success-message {
-        color: #28a745; /* Green color for success */
-        background-color: #e9f7ec; /* Light green background */
-        border: 1px solid #c3e6cb;
+        color: #28a745;
+        background-color: #1E1E1F;
+        border: none;
         padding: 10px 15px;
         border-radius: 6px;
         font-size: 0.9rem;
         text-align: center;
-        margin-bottom: 20px; /* Space below message */
+        margin-bottom: 20px;
     }
 
     .auth-form {
@@ -183,28 +183,30 @@
     }
 
     .form-group input {
-        padding: 14px 16px;
-        border: 1px solid #ccd0d5;
+        padding: 12px 16px;
+        border: 1px solid #333;
         border-radius: 6px;
         font-size: 1rem;
-        transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        background-color: #232328;
+        color: #EEE;
+        transition: border-color 0.2s ease-in-out, box-shadow 0 0 0 0;
     }
 
     .form-group input::placeholder {
-        color: #8a8d91;
+        color: #888;
     }
 
     .form-group input:focus {
         outline: none;
-        border-color: #007bff;
-        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.2);
+        border-color: #FFD66E;
+        box-shadow: none;
     }
 
     .submit-button {
         padding: 14px 20px;
         border: none;
-        background-color: #007bff;
-        color: white;
+        background-color: #FFD66E;
+        color: #131316;
         border-radius: 6px;
         cursor: pointer;
         font-size: 1.05rem;
@@ -215,11 +217,11 @@
     }
 
     .submit-button:hover:not(:disabled) {
-        background-color: #0056b3;
+        background-color: #e6c850;
     }
 
     .submit-button:disabled {
-        background-color: #a0cfff;
+        background-color: #333;
         cursor: not-allowed;
     }
 
@@ -236,13 +238,13 @@
         text-align: center;
         margin-top: 30px;
         padding-top: 20px;
-        border-top: 1px solid #e4e6eb;
+        border-top: 1px solid #333;
         font-size: 0.95rem;
-        color: #1c1e21;
+        color: #AAA;
     }
 
     .link-section a {
-        color: #007bff;
+        color: #FFD66E;
         text-decoration: none;
         font-weight: 500;
     }
@@ -256,7 +258,8 @@
        padding: 15px 20px;
        text-align: center;
        font-size: 0.8rem;
-       color: #8a8d91; 
+       color: #888;
+       background-color: #1E1E1F;
        margin-top: auto; 
     }
 </style> 
