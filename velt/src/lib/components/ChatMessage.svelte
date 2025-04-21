@@ -25,11 +25,13 @@
             <div class="message-content">
                 {message.text ?? message.content}
             </div>
-            <div class="timestamp">
-                {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-            </div>
         {/if}
     </div>
+    {#if !isLoading}
+        <div class="timestamp">
+            {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+        </div>
+    {/if}
 </div>
 
 <style>
@@ -37,6 +39,7 @@
     .message-wrapper {
         display: flex;
         width: 100%;
+        align-items: flex-end;
     }
     .message-wrapper.user {
         justify-content: flex-end;
@@ -68,7 +71,7 @@
 
     .message-content {
        /* Basic styling for text content */
-       margin-bottom: 5px; /* Space between text and actions */
+       margin: 0; /* Remove bottom margin for equal padding */
     }
 
     .loading {
@@ -133,14 +136,19 @@
 
     .timestamp {
         font-size: 0.7rem;
-        color: #555; /* user timestamp color */
-        margin-top: 4px;
-        align-self: flex-end;
+        color: #888;
     }
 
-    /* AI bubble timestamp color */
+    /* Position timestamp next to bubble with equal spacing */
+    .message-wrapper.user .timestamp {
+        order: -1;
+        margin-right: 4px;
+        margin-left: 0;
+    }
     .message-wrapper.ai .timestamp {
-        color: #888;
+        order: 1;
+        margin-left: 4px;
+        margin-right: 0;
     }
 
 </style> 

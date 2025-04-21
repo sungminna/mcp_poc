@@ -246,7 +246,10 @@
         {:else}
         {#each sessions as sess}
             <div class="session-item {sess.id === selectedSessionId ? 'selected' : ''}" on:click={() => { selectedSessionId = sess.id; fetchMessages(sess.id); }}>
-                <span class="session-title">Session {sess.id} — {new Date(sess.created_at).toLocaleString()}</span>
+                <div class="session-info">
+                    <div class="session-name">Session {sess.id}</div>
+                    <div class="session-time">{new Date(sess.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+                </div>
                 <button class="delete-button" on:click={(e) => { e.stopPropagation(); deleteChatSession(sess.id); }} aria-label="Delete session">삭제</button>
             </div>
         {/each}
@@ -509,33 +512,33 @@
 
     .session-item {
         display: flex;
-        justify-content: space-between;
-        align-items: center;
+        flex-direction: column;
+        align-items: flex-start;
         padding: 6px 8px;
         border-radius: 4px;
         cursor: pointer;
+        color: #EEE;
+        font-size: 0.85rem;
+        margin-bottom: 8px;
     }
 
-    .session-item.selected {
-        background-color: #e0e0e0;
-    }
-
-    .session-item:hover {
-        background-color: #f5f5f5;
-    }
+    .session-item.selected { background-color: #333; }
+    .session-item:hover { background-color: #2A2A2A; }
 
     .delete-button {
-        background: transparent;
+        align-self: flex-end;
+        background-color: #333;
         border: none;
-        color: #888;
+        color: #EEE;
         cursor: pointer;
-        font-size: 14px;
-        padding: 6px 12px;
+        font-size: 12px;
+        padding: 2px 4px;
         border-radius: 4px;
+        margin-top: 4px;
     }
-
     .delete-button:hover {
-        color: #3BD66A;
+        background-color: #3BD66A;
+        color: #131316;
     }
 
     .new-chat {
@@ -616,6 +619,21 @@
     .chat-messages-wrapper {
         scrollbar-width: thin;
         scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+    }
+
+    .session-info {
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
+    }
+    .session-name {
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #EEE;
+    }
+    .session-time {
+        font-size: 0.75rem;
+        color: #AAA;
     }
 
 </style>
