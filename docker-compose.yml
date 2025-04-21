@@ -13,5 +13,18 @@ services:
       - NEO4J_AUTH=neo4j/password # Change password in production!
       # - NEO4J_PLUGINS=["apoc", "graph-data-science"] # Uncomment to add plugins if needed
 
+  postgres:
+    image: bitnami/postgresql:latest # Use a specific PostgreSQL version
+    container_name: postgres_db
+    ports:
+      - "5432:5432" # Standard PostgreSQL port
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=user # Replace with your desired user
+      - POSTGRES_PASSWORD=password # Replace with your desired password
+      - POSTGRES_DB=fastapi_db # Replace with your desired database name
+
 volumes:
-  neo4j_data: 
+  neo4j_data:
+  postgres_data: # Add volume definition for PostgreSQL 
