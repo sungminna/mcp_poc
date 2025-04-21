@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 import asyncio
 import logging
 from datetime import datetime
+from collections import deque
 
 from services.llm_service import llm_ask # The main REACT agent call
 from services.neo4j_service import neo4j_service
@@ -27,6 +28,10 @@ extraction_model = ChatOpenAI(model="gpt-4.1-nano") # Use a suitable model
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# In-memory rolling context for each chat session
+session_contexts: dict[int, deque] = {}
+MAX_CONTEXT_MESSAGES = 10
 
 # --- Pydantic models for LLM extraction ---
 class ExtractedInfo(BaseModel):
@@ -69,12 +74,24 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
         session = create_session(db, current_user.id)
     session_id = session.id
 
+    # Initialize or load rolling context window
+    if session_id not in session_contexts:
+        if request.session_id:
+            past_messages = get_messages(db, session_id)
+            session_contexts[session_id] = deque(
+                [(msg.sender, msg.content) for msg in past_messages[-MAX_CONTEXT_MESSAGES:]],
+                maxlen=MAX_CONTEXT_MESSAGES
+            )
+        else:
+            session_contexts[session_id] = deque(maxlen=MAX_CONTEXT_MESSAGES)
+
     # Save user's message to the database
     create_chat_message(db, session_id, "human", user_message)
+    # Update rolling context with new user message
+    session_contexts[session_id].append(("human", user_message))
 
     # --- Step 3 & 4: Extract Info & Save (Run in Background) ---
     extracted_info_list = []
-    print("aasdfasdf")
     try:
         # Call LLM to extract information
         extraction_result = await info_extraction_chain.ainvoke({
@@ -123,13 +140,20 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
         logger.error(f"Error during keyword extraction or similarity search for user '{username}': {e}", exc_info=True)
         # Continue without augmentation if this phase fails
 
-    # --- Step 8 & 9: Augment Prompt & Call Main LLM --- 
-    augmented_question = user_message + augmentation_context
-    logger.debug(f"Augmented question for user '{username}': \n{augmented_question}")
+    # --- Step 8 & 9: Build rolling context, augment prompt, and call main LLM ---
+    # Build conversation history prompt from rolling context
+    history_text = ""
+    if session_contexts[session_id]:
+        history_text = "\n".join([
+            f"{'User' if sender=='human' else 'AI'}: {content}"
+            for sender, content in session_contexts[session_id]
+        ])
+    prompt_input = (history_text + "\n" if history_text else "") + user_message + augmentation_context
+    logger.debug(f"Augmented prompt for user '{username}': \n{prompt_input}")
 
     try:
         # Call the main REACT agent with the potentially augmented question
-        res = await llm_ask(augmented_question)
+        res = await llm_ask(prompt_input)
 
         if res and 'response' in res:
             try:
@@ -145,6 +169,8 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
                     logger.info(f"Successfully generated final response for user '{username}' in session {session_id}")
                     # Save AI's response to the database
                     create_chat_message(db, session_id, "agent", final_message)
+                    # Update rolling context with new agent message
+                    session_contexts[session_id].append(("agent", final_message))
                     return {"session_id": session_id, "question": user_message, "ai_response": final_message}
                 else:
                     logger.error(f"Could not extract final message content from LLM response for user '{username}'. Response: {res['response']}")
@@ -206,4 +232,7 @@ async def remove_session(session_id: int, current_user: User = Depends(get_curre
     if not session or session.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Chat session not found")
     delete_session(db, session_id)
+    # Clear rolling context cache for deleted session
+    if session_id in session_contexts:
+        del session_contexts[session_id]
     return 
