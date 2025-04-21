@@ -1,8 +1,10 @@
 <script lang="ts">
     export let message: {
         id: number;
-        text: string;
+        text?: string;
+        content?: string;
         sender: 'user' | 'ai';
+        timestamp: number;
     };
     export let isLoading: boolean = false;
 
@@ -21,10 +23,15 @@
             <div class="dot-flashing"></div>
         {:else}
             <div class="message-content">
-                {message.text}
+                {message.text ?? message.content}
             </div>
         {/if}
     </div>
+    {#if !isLoading}
+        <div class="timestamp">
+            {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+        </div>
+    {/if}
 </div>
 
 <style>
@@ -32,6 +39,7 @@
     .message-wrapper {
         display: flex;
         width: 100%;
+        align-items: flex-end;
     }
     .message-wrapper.user {
         justify-content: flex-end;
@@ -41,37 +49,29 @@
     }
 
     .message-bubble {
-        padding: 12px 18px; /* Slightly larger padding */
-        border-radius: 22px; /* More rounded */
-        max-width: 80%; /* Adjusted max width */
+        padding: 10px 14px;
+        border-radius: 16px;
+        max-width: 75%;
         word-wrap: break-word;
-        line-height: 1.5;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); /* Subtle shadow */
+        line-height: 1.4;
         position: relative;
-        display: flex; /* Use flex for content and actions */
-        flex-direction: column; /* Stack content and actions vertically */
+        display: flex;
+        flex-direction: column;
     }
 
     .user-message {
-        background-color: #f0f0f0; /* Light gray for user */
-        color: #000000; /* Black text for user */
-        /* align-self: flex-end; Already handled by wrapper */
-        border-bottom-right-radius: 8px; /* Match image corner */
-        /* margin-left: auto; Already handled by wrapper */
+        background-color: #3BD66A;
+        color: #000;
     }
 
     .ai-message {
-        background-color: #ffffff; /* White for AI */
-        color: #000000; /* Black text for AI */
-        /* align-self: flex-start; Already handled by wrapper */
-        border: 1px solid #e5e5e5; /* Subtle border for AI bubble */
-        border-bottom-left-radius: 8px; /* Match image corner */
-        /* margin-right: auto; Already handled by wrapper */
+        background-color: #3B3B3B;
+        color: #fff;
     }
 
     .message-content {
        /* Basic styling for text content */
-       margin-bottom: 5px; /* Space between text and actions */
+       margin: 0; /* Remove bottom margin for equal padding */
     }
 
     .loading {
@@ -132,6 +132,23 @@
         50%, 100% {
             background-color: rgba(160, 160, 160, 0.3);
         }
+    }
+
+    .timestamp {
+        font-size: 0.7rem;
+        color: #888;
+    }
+
+    /* Position timestamp next to bubble with equal spacing */
+    .message-wrapper.user .timestamp {
+        order: -1;
+        margin-right: 4px;
+        margin-left: 0;
+    }
+    .message-wrapper.ai .timestamp {
+        order: 1;
+        margin-left: 4px;
+        margin-right: 0;
     }
 
 </style> 
