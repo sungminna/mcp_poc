@@ -195,7 +195,8 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
 
 class SessionResponse(BaseModel):
     id: int
-    created_at: datetime
+    first_user_message: str = Field(..., description="Content of the first human query in the session")
+    first_ai_response: str = Field(..., description="Content of the first AI response in the session")
 
     class Config:
         orm_mode = True
@@ -212,8 +213,15 @@ class MessageResponse(BaseModel):
 
 @router.get("/api/chat/sessions", response_model=List[SessionResponse], tags=["chat"])
 async def list_sessions(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """List all chat sessions for the current user"""
-    sessions = get_sessions(db, current_user.id)
+    """List all chat sessions for the current user with first question and answer preview"""
+    db_sessions = get_sessions(db, current_user.id)
+    sessions = []
+    for sess in db_sessions:
+        msgs = get_messages(db, sess.id)
+        # Get first human query and first AI response
+        first_user = msgs[0].content if len(msgs) > 0 else ""
+        first_ai = msgs[1].content if len(msgs) > 1 else ""
+        sessions.append({"id": sess.id, "first_user_message": first_user, "first_ai_response": first_ai})
     return sessions
 
 @router.get("/api/chat/{session_id}/messages", response_model=List[MessageResponse], tags=["chat"])

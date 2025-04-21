@@ -17,7 +17,7 @@
         sender: 'user' | 'ai';
         timestamp: string;
     };
-    type Session = { id: number; created_at: string };
+    type Session = { id: number; first_user_message: string; first_ai_response: string };
 
     let sessions: Session[] = [];
     let selectedSessionId: number | null = null;
@@ -252,8 +252,20 @@
         {#each sessions as sess}
             <div class="session-item {sess.id === selectedSessionId ? 'selected' : ''}" on:click={() => { selectedSessionId = sess.id; fetchMessages(sess.id); }}>
                 <div class="session-info">
-                    <div class="session-name">Session {sess.id}</div>
-                    <div class="session-time">{new Date(sess.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+                    <div class="session-name">
+                        {sess.first_user_message
+                            ? (sess.first_user_message.length > 20
+                                ? sess.first_user_message.slice(0,20) + '...'
+                                : sess.first_user_message)
+                            : '새로운 대화'}
+                    </div>
+                    <div class="session-time">
+                        {sess.first_ai_response
+                            ? (sess.first_ai_response.length > 20
+                                ? sess.first_ai_response.slice(0,20) + '...'
+                                : sess.first_ai_response)
+                            : ''}
+                    </div>
                 </div>
                 <button class="delete-button" on:click={(e) => { e.stopPropagation(); deleteChatSession(sess.id); }} aria-label="Delete session">삭제</button>
             </div>
@@ -541,6 +553,7 @@
     }
 
     .session-item {
+        position: relative;
         display: flex;
         flex-direction: column;
         align-items: flex-start;
