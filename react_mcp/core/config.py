@@ -12,4 +12,5 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
 
 # --- Database Settings ---
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db") 
+# Default assumes DB is running on localhost if app is outside Docker
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:password@localhost:5432/fastapi_db") 

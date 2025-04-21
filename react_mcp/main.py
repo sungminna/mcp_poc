@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from contextlib import asynccontextmanager # Import asynccontextmanager
 import logging # Import logging
 
-from database import engine, Base # Import database engine and Base
+from database import engine, Base, get_db # Import database engine, Base, and get_db
 from models import user as user_model # Import user model to create table
 from services.neo4j_service import neo4j_service # Import the Neo4j service instance
 
@@ -16,32 +16,41 @@ import models.chat  # Register chat models so their tables are created
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Async function to create tables ---
+async def create_db_tables():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables checked/created.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Application startup...")
     try:
-        neo4j_service.connect() # Connect to Neo4j
+        # Create database tables asynchronously
+        await create_db_tables()
+
+        # Connect to Neo4j
+        neo4j_service.connect() # Assuming this is synchronous or handled internally
         logger.info("Neo4j service connected.")
         # Attempt to create indexes after connection
         logger.info("Attempting to create Neo4j indexes...")
-        await neo4j_service.create_indexes()
+        await neo4j_service.create_indexes() # Assuming this is async
         logger.info("Neo4j index creation attempt finished.")
     except Exception as e:
         # Log connection or index creation errors
-        logger.error(f"Failed during Neo4j service initialization (connect/create_indexes): {e}", exc_info=True)
+        logger.error(f"Failed during startup initialization: {e}", exc_info=True)
         # Depending on requirements, you might want to prevent startup if DB init fails
-        # raise HTTPException(status_code=500, detail="Database initialization failed")
+        # raise HTTPException(status_code=500, detail="Initialization failed")
     yield
     # Shutdown
     logger.info("Application shutdown...")
-    neo4j_service.close()
+    neo4j_service.close() # Assuming this is synchronous or handled internally
     logger.info("Neo4j service connection closed.")
 
 
-# Create database tables (assuming this is for a relational DB like Postgres/SQLite)
-Base.metadata.create_all(bind=engine)
+# Create database tables moved to lifespan
+# Base.metadata.create_all(bind=engine) # <--- REMOVE THIS LINE
 
 load_dotenv()
 

@@ -1,20 +1,33 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 from core.config import DATABASE_URL
 
-engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False} # Needed only for SQLite
+# Use create_async_engine
+engine = create_async_engine(
+    DATABASE_URL, 
+    # connect_args={"check_same_thread": False} # Not needed/applicable for asyncpg
+    echo=True # Optional: Log SQL queries, helpful for debugging
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Use async_sessionmaker and AsyncSession
+AsyncSessionLocal = sessionmaker(
+    bind=engine, 
+    class_=AsyncSession, 
+    expire_on_commit=False, 
+    autocommit=False, 
+    autoflush=False
+)
 
 Base = declarative_base()
 
-# Dependency to get DB session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close() 
+# Async dependency to get DB session
+async def get_db() -> AsyncSession: # Type hint return value
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception as e:
+            await session.rollback() # Rollback on error
+            raise e
+        finally:
+            await session.close() # Ensure session is closed 
