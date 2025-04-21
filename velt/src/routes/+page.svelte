@@ -597,4 +597,25 @@
         outline: none;
     }
 
+    /* Completely transparent scrollbar track and background */
+    .chat-messages-wrapper::-webkit-scrollbar {
+        width: 4px;
+    }
+    .chat-messages-wrapper::-webkit-scrollbar-track,
+    .chat-messages-wrapper::-webkit-scrollbar-track-piece,
+    .chat-messages-wrapper::-webkit-scrollbar-corner {
+        background: none;
+        border: none;
+    }
+    .chat-messages-wrapper::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.3);
+        border-radius: 2px;
+        border: none;
+    }
+    /* Firefox scrollbar styling */
+    .chat-messages-wrapper {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+    }
+
 </style>
