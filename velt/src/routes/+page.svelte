@@ -319,7 +319,7 @@
             <button class="icon-button action-button" on:click={sendMessage} disabled={!newMessageText.trim() || loadingAIResponse} aria-label="Send">{@html sendIcon}</button>
         </div>
         <footer class="chat-footer">
-            ChatGPT는 실수를 할 수 있습니다. 중요한 정보는 재차 확인하세요.
+            Velt는 실수를 할 수 있습니다. 중요한 정보는 재차 확인하세요.
         </footer>
     </div>
 </div>
