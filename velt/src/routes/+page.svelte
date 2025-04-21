@@ -5,6 +5,7 @@
     import { goto } from '$app/navigation';
 
     const sendIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" /></svg>`;
+    const hamburgerIcon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" width="24" height="24" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>`;
     const backIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>`;
     const searchIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" width="24" height="24"><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/></svg>`;
     const menuIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><circle cx="12" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg>`;
@@ -31,6 +32,7 @@
     let messagesLoading: boolean = false;
     let groupedMessages: Array<{ type: 'date'; date: string } | { type: 'message'; message: Message }> = [];
     let groupTitle = '새로운 채팅';
+    let sidebarCollapsed = false;
 
     // Update header title based on selected session
     $: groupTitle = selectedSessionId != null ? `Session ${selectedSessionId}` : '새로운 채팅';
@@ -242,7 +244,7 @@
 </script>
 
 <div class="layout">
-    <aside class="sidebar">
+    <aside class="sidebar {sidebarCollapsed ? 'collapsed' : ''}">
         <button class="new-chat" on:click={() => { selectedSessionId = null; messages = []; }}>New Chat</button>
         {#if sessionsLoading}
             <div class="sidebar-spinner"><div class="spinner"></div></div>
@@ -261,7 +263,9 @@
     <div class="chat-page-container">
         <header class="chat-header">
             <div class="header-left">
-                <button class="icon-button back-button" aria-label="Back">{@html backIcon}</button>
+                <button class="icon-button toggle-button" aria-label="Toggle sidebar" on:click={() => sidebarCollapsed = !sidebarCollapsed}>
+                    {@html hamburgerIcon}
+                </button>
                 <span class="header-title">{groupTitle}</span>
             </div>
             <div class="header-right">
@@ -324,6 +328,7 @@
     .layout { display: flex; height: 100vh; }
     .sidebar {
         width: 240px;
+        transition: width 0.3s ease, padding 0.3s ease;
         border-right: 1px solid #222;
         padding: 10px;
         overflow-y: auto;
@@ -335,15 +340,29 @@
     .sidebar div { padding: 6px; cursor: pointer; border-radius: 4px; color: #EEE; }
     .sidebar div.selected { background-color: #333; }
     .sidebar div:hover { background-color: #2A2A2A; }
+    .sidebar.collapsed {
+        width: 0;
+        padding: 0;
+        overflow: hidden;
+    }
+    .sidebar > * {
+        opacity: 1;
+        transition: opacity 0.3s ease;
+    }
+    .sidebar.collapsed > * {
+        opacity: 0.1;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+    }
 
     .chat-page-container {
         display: flex;
         flex-direction: column;
         height: 100vh;
-        width: 100%;
         margin: 0;
         background-color: #131316;
         overflow: hidden;
+        flex: 1;
     }
 
     .chat-header {
@@ -640,6 +659,14 @@
     .session-time {
         font-size: 0.75rem;
         color: #AAA;
+    }
+
+    .toggle-button {
+        background: transparent;
+        border: none;
+        color: inherit;
+        padding: 4px;
+        cursor: pointer;
     }
 
 </style>
