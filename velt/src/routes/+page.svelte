@@ -285,27 +285,31 @@
             {#if messagesLoading}
                 <div class="messages-loading"><div class="spinner"></div></div>
             {:else}
-            <div class="chat-messages">
-                {#each groupedMessages as item, idx}
-                    {#if item.type === 'date'}
-                        <div class="date-sep">{item.date}</div>
-                    {:else}
-                        <div transition:slide={{ duration: 300 }}>
-                            <ChatMessage message={item.message} />
-                        </div>
+                {#if groupedMessages.length === 0}
+                    <div class="empty-state">새로운 대화를 시작해보세요.</div>
+                {:else}
+                <div class="chat-messages">
+                    {#each groupedMessages as item, idx}
+                        {#if item.type === 'date'}
+                            <div class="date-sep">{item.date}</div>
+                        {:else}
+                            <div transition:slide={{ duration: 300 }}>
+                                <ChatMessage message={item.message} />
+                            </div>
+                        {/if}
+                    {/each}
+                    {#if loadingAIResponse}
+                        <ChatMessage message={{ id: -1, text: '...', sender: 'ai', timestamp: new Date().toISOString() }} isLoading={true}/>
                     {/if}
-                {/each}
-                {#if loadingAIResponse}
-                    <ChatMessage message={{ id: -1, text: '...', sender: 'ai', timestamp: new Date().toISOString() }} isLoading={true}/>
+                </div>
                 {/if}
-            </div>
             {/if}
         </div>
 
         <div class="chat-input-area">
             <div class="textarea-container">
                 <input
-                    type="text"
+                    bind:this={textareaElement}
                     bind:value={newMessageText}
                     placeholder="메시지 입력"
                     on:keydown={(e) => {
@@ -449,6 +453,7 @@
         overflow-y: auto;
         padding: 20px;
         background-color: #131316;
+        position: relative;
     }
 
     .chat-messages {
@@ -546,8 +551,9 @@
         font-size: 0.85rem;
         margin-bottom: 8px;
     }
-
-    .session-item.selected { background-color: #333; }
+    .session-item.selected {
+        background-color: #333;
+    }
     .session-item:hover { background-color: #2A2A2A; }
 
     .delete-button {
@@ -667,6 +673,13 @@
         color: inherit;
         padding: 4px;
         cursor: pointer;
+    }
+
+    .empty-state {
+        color: #777;
+        font-size: 1rem;
+        text-align: center;
+        margin-top: 40%;
     }
 
 </style>
