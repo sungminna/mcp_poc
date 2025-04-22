@@ -1,5 +1,5 @@
 import os
-from neo4j import GraphDatabase, Driver, Session, Transaction
+from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession
 from dotenv import load_dotenv
 import logging
 from typing import List, Any, Dict, Tuple
@@ -24,96 +24,88 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 
 aclient = AsyncOpenAI()
 
-# --- Synchronous Neo4j Helper Functions (to be run in threads) ---
-
-def _sync_run_write_query(driver: Driver, query: str, params: Dict[str, Any] = None):
-    """Runs a write query within a session and returns the result summary."""
+# --- Async Neo4j Helper Functions ---
+async def _async_run_write_query(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
+    """Runs a write query within a session and returns the result summary asynchronously."""
     try:
-        with driver.session(database="neo4j") as session:
-            result = session.run(query, params)
-            summary = result.consume() # Consume result to get summary
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            summary = await result.consume()
             return summary
     except Exception as e:
-        logger.error(f"Sync write query failed: {query} | Params: {params} | Error: {e}", exc_info=True)
-        raise # Re-raise exception to be caught by asyncio.gather
+        logger.error(f"Async write query failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        raise
 
-def _sync_fetch_single(driver: Driver, query: str, params: Dict[str, Any] = None):
-    """Runs a query and fetches a single record."""
+async def _async_fetch_single(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
+    """Runs a query and fetches a single record asynchronously."""
     try:
-        with driver.session(database="neo4j") as session:
-            result = session.run(query, params)
-            record = result.single()
-            # Convert Neo4j Node/Relationship to dictionary if needed, or return the object
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            record = await result.single()
             return record
     except Exception as e:
-        logger.error(f"Sync fetch single failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        logger.error(f"Async fetch single failed: {query} | Params: {params} | Error: {e}", exc_info=True)
         raise
 
-def _sync_fetch_list(driver: Driver, query: str, params: Dict[str, Any] = None):
-    """Runs a query and fetches a list of records."""
+async def _async_fetch_list(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
+    """Runs a query and fetches a list of records asynchronously."""
     try:
-        with driver.session(database="neo4j") as session:
-            result = session.run(query, params)
-            # Correct way to get all records as a list from sync Result object
-            records = list(result)
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            records = [record async for record in result]
             return records
     except Exception as e:
-        logger.error(f"Sync fetch list failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        logger.error(f"Async fetch list failed: {query} | Params: {params} | Error: {e}", exc_info=True)
         raise
 
-def _sync_create_node_get_id(driver: Driver, query: str, params: Dict[str, Any] = None) -> int | None:
-    """Runs a query to create/merge a node and returns its internal Neo4j ID."""
+async def _async_create_node_get_id(driver: AsyncDriver, query: str, params: Dict[str, Any] = None) -> int | None:
+    """Runs a query to create/merge a node and returns its internal Neo4j ID asynchronously."""
     try:
-        with driver.session(database="neo4j") as session:
-            result = session.run(query, params)
-            record = result.single()
-            # Return elementId (string) or node id (int)? Neo4j internal IDs are ints.
-            # elementId() returns string. Let's stick to internal int ID for now for consistency
-            # with potential relationship IDs, though elementId is preferred for external refs.
-            # If issues arise, switch to elementId() and adjust Milvus schema if needed.
-            return record[0] if record else None 
-    except Exception as e:
-        logger.error(f"Sync create node get ID failed: {query} | Params: {params} | Error: {e}", exc_info=True)
-        raise
-
-def _sync_create_relationship_get_id(driver: Driver, query: str, params: Dict[str, Any] = None) -> int | None:
-    """Runs a query to create/merge a relationship and returns its internal Neo4j ID."""
-    try:
-        with driver.session(database="neo4j") as session:
-            result = session.run(query, params)
-            record = result.single()
-            # Use internal ID (int) for consistency for now.
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            record = await result.single()
             return record[0] if record else None
     except Exception as e:
-        logger.error(f"Sync create relationship get ID failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        logger.error(f"Async create node get ID failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        raise
+
+async def _async_create_relationship_get_id(driver: AsyncDriver, query: str, params: Dict[str, Any] = None) -> int | None:
+    """Runs a query to create/merge a relationship and returns its internal Neo4j ID asynchronously."""
+    try:
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            record = await result.single()
+            return record[0] if record else None
+    except Exception as e:
+        logger.error(f"Async create relationship get ID failed: {query} | Params: {params} | Error: {e}", exc_info=True)
         raise
 
 # --- Neo4jService Class --- 
 
 class Neo4jService:
-    _driver: Driver | None = None
+    _driver: AsyncDriver | None = None
     # Added asyncio Lock for Milvus check/insert logic
     _milvus_insert_lock = asyncio.Lock()
 
-    def connect(self):
+    async def connect(self):
         if self._driver is None:
             try:
                 logger.info(f"Attempting to connect to Neo4j at {NEO4J_URI}")
-                self._driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-                self._driver.verify_connectivity()
+                self._driver = AsyncGraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+                await self._driver.verify_connectivity()
                 logger.info("Neo4j connection successful.")
             except Exception as e:
                 logger.error(f"Failed to connect to Neo4j or verify connectivity: {e}", exc_info=True)
                 self._driver = None
                 raise
 
-    def close(self):
+    async def close(self):
         if self._driver is not None:
-            self._driver.close()
+            await self._driver.close()
             logger.info("Neo4j connection closed.")
             self._driver = None
 
-    def get_driver(self) -> Driver:
+    def get_driver(self) -> AsyncDriver:
         if self._driver is None:
             raise ConnectionError("Neo4j driver is not initialized. Call connect() first.")
         return self._driver
@@ -152,7 +144,7 @@ class Neo4jService:
         
         try:
             # Run both constraint creations
-            tasks = [asyncio.to_thread(_sync_run_write_query, driver, query) for query in constraint_queries]
+            tasks = [_async_run_write_query(driver, query) for query in constraint_queries]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             # Log results
@@ -185,9 +177,7 @@ class Neo4jService:
         props = {"email": user_info.get("email")}
         props = {k: v for k, v in props.items() if v is not None}
         try:
-            record = await asyncio.to_thread(
-                _sync_fetch_single, driver, query, params={"username": username, "props": props}
-            )
+            record = await _async_fetch_single(driver, query, params={"username": username, "props": props})
             if record:
                 logger.info(f"User node '{username}' created or updated in Neo4j (run in thread).")
                 return record[0] # Return the node object/dict from the record
@@ -206,9 +196,7 @@ class Neo4jService:
         # 1. Check if user exists (remains the same)
         user_check_query = "MATCH (u:User {username: $username}) RETURN u.username"
         try:
-            user_record = await asyncio.to_thread(
-                _sync_fetch_single, driver, user_check_query, params={"username": username}
-            )
+            user_record = await _async_fetch_single(driver, user_check_query, params={"username": username})
             if not user_record:
                 logger.error(f"User '{username}' not found in Neo4j. Cannot save info.")
                 return False
@@ -313,23 +301,23 @@ class Neo4jService:
                     "MERGE (i:Information {key: $key, value: $value}) "
                     "ON CREATE SET i.createdAt = timestamp(), i.children = [] "
                     "ON MATCH SET i.updatedAt = timestamp() "
-                    "RETURN id(i)"
+                    "RETURN elementId(i)"
                 )
                 node_params = {"key": key_str, "value": value}
-                neo4j_node_id = await asyncio.to_thread(_sync_create_node_get_id, driver, create_node_query, node_params)
+                neo4j_node_id = await _async_create_node_get_id(driver, create_node_query, node_params)
                 if neo4j_node_id is None: raise ValueError(f"Failed to create/get node ID for {value}")
 
                 # Step 2b: Relationship
                 create_rel_query = (
                     "MATCH (u:User {username: $username}) "
-                    "MATCH (i:Information) WHERE id(i) = $node_id " 
+                    "MATCH (i:Information) WHERE elementId(i) = $node_id " 
                     "MERGE (u)-[r:RELATES_TO {value: $relationship_verb}]->(i) "
                     "ON CREATE SET r.lifetime = $lifetime, r.createdAt = timestamp() "
                     "ON MATCH SET r.lifetime = $lifetime, r.updatedAt = timestamp() " 
-                    "RETURN id(r)"
+                    "RETURN elementId(r)"
                 )
                 rel_params = {"username": username, "node_id": neo4j_node_id, "relationship_verb": relationship_verb, "lifetime": lifetime}
-                neo4j_rel_id = await asyncio.to_thread(_sync_create_relationship_get_id, driver, create_rel_query, rel_params)
+                neo4j_rel_id = await _async_create_relationship_get_id(driver, create_rel_query, rel_params)
                 if neo4j_rel_id is None: logger.error(f"Failed to create/get relationship ID for {rel_text} -> {node_text}") # Log error but continue
 
                 # Step 2c: Key Node & Hierarchy
@@ -338,21 +326,21 @@ class Neo4jService:
                     "MERGE (k:Information {key: $key_node_key, value: $key_value}) "
                     "ON CREATE SET k.createdAt = timestamp(), k.children = [] "
                     "ON MATCH SET k.updatedAt = timestamp() "
-                    "RETURN id(k)"
+                    "RETURN elementId(k)"
                 )
                 key_node_params = {"key_node_key": key_node_key_prop, "key_value": key_str}
-                neo4j_key_node_id = await asyncio.to_thread(_sync_create_node_get_id, driver, create_key_node_query, key_node_params)
+                neo4j_key_node_id = await _async_create_node_get_id(driver, create_key_node_query, key_node_params)
                 if neo4j_key_node_id is None: raise ValueError(f"Failed to create/get key node ID for {key_str}")
                 
                 create_hierarchy_rel_query = (
-                    "MATCH (i:Information) WHERE id(i) = $node_id "
-                    "MATCH (k:Information) WHERE id(k) = $key_node_id "
+                    "MATCH (i:Information) WHERE elementId(i) = $node_id "
+                    "MATCH (k:Information) WHERE elementId(k) = $key_node_id "
                     "MERGE (i)-[h:HAS_CATEGORY]->(k) "
                     "ON CREATE SET h.createdAt = timestamp() "
                     "ON MATCH SET h.updatedAt = timestamp()"
                 )
                 hierarchy_rel_params = {"node_id": neo4j_node_id, "key_node_id": neo4j_key_node_id}
-                await asyncio.to_thread(_sync_run_write_query, driver, create_hierarchy_rel_query, hierarchy_rel_params)
+                await _async_run_write_query(driver, create_hierarchy_rel_query, hierarchy_rel_params)
 
             except Exception as e:
                 logger.error(f"Error during Neo4j element creation/linking for info key='{key_str}', value='{value}': {e}. Skipping Milvus prep for this item.", exc_info=True)
@@ -463,7 +451,7 @@ class Neo4jService:
                 MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
                 WHERE r.value IN $texts OR i.value IN $texts
                 RETURN 
-                    id(r) AS rel_id, 
+                    elementId(r) AS rel_id, 
                     r.value AS relationship, 
                     i.key AS node_key, 
                     i.value AS node_value, 
@@ -473,8 +461,7 @@ class Neo4jService:
                 ORDER BY i.createdAt DESC
                 LIMIT $limit
                 """
-                query1_results = await asyncio.to_thread(
-                    _sync_fetch_list, driver, query1,
+                query1_results = await _async_fetch_list(driver, query1,
                     params={"username": username, "texts": relevant_texts, "limit": top_k * 5} # Fetch more initially
                 )
                 
@@ -504,7 +491,7 @@ class Neo4jService:
                 MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
                 WHERE i.value IN $child_keywords // Match node value against children
                 RETURN 
-                    id(r) AS rel_id, 
+                    elementId(r) AS rel_id, 
                     r.value AS relationship, 
                     i.key AS node_key, 
                     i.value AS node_value, 
@@ -514,8 +501,7 @@ class Neo4jService:
                 ORDER BY i.createdAt DESC
                 LIMIT $limit
                 """
-                query2_results = await asyncio.to_thread(
-                    _sync_fetch_list, driver, query2,
+                query2_results = await _async_fetch_list(driver, query2,
                     params={"username": username, "child_keywords": list(child_keywords), "limit": top_k * 3}
                 )
                 if query2_results:

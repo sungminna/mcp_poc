@@ -88,7 +88,7 @@ def _sync_search_vectors(collection: Collection, search_vectors: List[List[float
         "param": {"metric_type": "COSINE", "params": {"ef": 128}}, # Search parameters, tune ef
         "limit": top_k * 5, # Fetch more initially
         # "expr": f'{MILVUS_ELEMENT_TYPE_FIELD} == "Relationship"', # Removed expr, searching all types
-        "output_fields": [MILVUS_ID_FIELD, MILVUS_TEXT_FIELD, MILVUS_ELEMENT_TYPE_FIELD] # Get text and type
+        "output_fields": [MILVUS_TEXT_FIELD, MILVUS_ELEMENT_TYPE_FIELD] # Get text and type
     }
     try:
         # Ensure the collection is loaded before searching
@@ -116,7 +116,6 @@ def _sync_search_vectors(collection: Collection, search_vectors: List[List[float
                     element_type = hit.entity.get(MILVUS_ELEMENT_TYPE_FIELD)
                     if original_text and original_text not in unique_texts:
                         processed_hits.append({
-                            "milvus_id": hit.id,
                             "original_text": original_text,
                             "element_type": element_type,
                             "score": hit.score
@@ -156,7 +155,7 @@ def _sync_get_vector_id_by_text(collection: Collection, text: str) -> Optional[i
         "param": {}, 
         "limit": 1,
         "expr": expr,
-        "output_fields": [MILVUS_ID_FIELD] 
+        "output_fields": [MILVUS_TEXT_FIELD] 
     }
     logger.debug(f"Executing Milvus text search with expr: {expr}") # Log expression
     try:
@@ -165,9 +164,13 @@ def _sync_get_vector_id_by_text(collection: Collection, text: str) -> Optional[i
         
         if results and results[0]:
             first_hit = results[0][0]
-            milvus_id = first_hit.id
-            logger.info(f"Found existing Milvus vector ID {milvus_id} for text: '{normalized_text[:50]}...'") # Changed level to INFO
-            return milvus_id
+            original_text = first_hit.entity.get(MILVUS_TEXT_FIELD)
+            if original_text:
+                logger.info(f"Found existing Milvus vector for text: '{original_text[:50]}...'") # Changed level to INFO
+                return original_text
+            else:
+                logger.info(f"No existing Milvus vector found for text: '{normalized_text[:50]}...'") # Changed level to INFO
+                return None
         else:
             logger.info(f"No existing Milvus vector found for text: '{normalized_text[:50]}...'") # Changed level to INFO
             return None
@@ -376,10 +379,10 @@ class MilvusService:
             return None
         
         try:
-            milvus_id = await asyncio.to_thread(
+            original_text = await asyncio.to_thread(
                 _sync_get_vector_id_by_text, self._collection, normalized_text
             )
-            return milvus_id
+            return original_text
         except Exception as e:
             logger.error(f"Failed to get vector ID by text '{normalized_text[:50]}...' via thread: {e}")
             return None

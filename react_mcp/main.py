@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
         await create_db_tables()
 
         # Connect to Neo4j and create constraints/indexes
-        neo4j_service.connect()
+        await neo4j_service.connect()
         logger.info("Neo4j service connection verified.")
         logger.info("Attempting to create Neo4j constraints...")
         await neo4j_service.create_indexes() # Now only creates constraints
@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Application shutdown...")
-    neo4j_service.close()
+    await neo4j_service.close()
     logger.info("Neo4j service connection closed.")
     milvus_service.close()
     logger.info("Milvus service connection closed.")
