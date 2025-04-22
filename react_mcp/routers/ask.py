@@ -144,11 +144,13 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
     # Build conversation history prompt from rolling context
     history_text = ""
     if session_contexts[session_id]:
-        history_text = "\n".join([
+        # Add a prefix to indicate this is the history
+        history_text = "Conversation History:\n" + "\n".join([
             f"{'User' if sender=='human' else 'AI'}: {content}"
             for sender, content in session_contexts[session_id]
         ])
-    prompt_input = (history_text + "\n" if history_text else "") + user_message + augmentation_context
+    # Construct the full prompt: History (if any), new user message, and augmentation context
+    prompt_input = (history_text + "\n\n" if history_text else "") + f"User: {user_message}" + augmentation_context
     logger.debug(f"Augmented prompt for user '{username}': \n{prompt_input}")
 
     try:
