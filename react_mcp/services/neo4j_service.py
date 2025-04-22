@@ -8,6 +8,7 @@ from functools import partial
 from openai import AsyncOpenAI, OpenAIError
 from datetime import datetime
 import json # Added import for JSON serialization
+import redis.asyncio as aioredis  # Added async Redis client import
 
 # Import Milvus service - Remove unused fields if applicable
 # Updated import to remove non-existent names
@@ -23,6 +24,16 @@ NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 
 aclient = AsyncOpenAI()
+
+# Initialize Redis client singleton for embedding cache
+_redis_client: aioredis.Redis | None = None
+
+def get_redis_client() -> aioredis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        _redis_client = aioredis.from_url(redis_url, encoding="utf-8", decode_responses=True)
+    return _redis_client
 
 # --- Async Neo4j Helper Functions ---
 async def _async_run_write_query(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
@@ -111,25 +122,39 @@ class Neo4jService:
         return self._driver
 
     async def generate_embedding(self, text: str) -> list[float]:
-        """Generates embedding for the given text using OpenAI API."""
+        """Generates embedding for the given text using OpenAI API with Redis caching."""
         if not text:
             logger.warning("generate_embedding called with empty text.")
             return [0.0] * EMBEDDING_DIMENSION
-        
-        text = text.replace("\n", " ")
+
+        text_key = text.replace("\n", " ").strip()
+        cache_key = f"kw_embedding:{text_key}"
+        redis_client = get_redis_client()
+        try:
+            cached = await redis_client.get(cache_key)
+            if cached:
+                logger.debug(f"Embedding cache hit for text: '{text_key[:50]}...'")
+                return json.loads(cached)
+        except Exception as e:
+            logger.error(f"Redis cache get error for key {cache_key}: {e}", exc_info=True)
+
         try:
             response = await aclient.embeddings.create(
-                input=[text],
+                input=[text_key],
                 model=OPENAI_EMBEDDING_MODEL
             )
             embedding = response.data[0].embedding
+            try:
+                await redis_client.set(cache_key, json.dumps(embedding), ex=86400)  # cache for 1 day
+            except Exception as e:
+                logger.error(f"Redis cache set error for key {cache_key}: {e}", exc_info=True)
             return embedding
         except OpenAIError as e:
-            logger.error(f"OpenAI API error generating embedding for text '{text[:50]}...': {e}")
-            return [0.0] * EMBEDDING_DIMENSION # Fallback
+            logger.error(f"OpenAI API error generating embedding for text '{text_key[:50]}...': {e}")
+            return [0.0] * EMBEDDING_DIMENSION
         except Exception as e:
             logger.error(f"Unexpected error generating embedding: {e}", exc_info=True)
-            return [0.0] * EMBEDDING_DIMENSION # Fallback
+            return [0.0] * EMBEDDING_DIMENSION
 
     async def create_indexes(self):
         """Creates necessary constraints (vector indexes are now in Milvus)."""
