@@ -90,32 +90,10 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
     # Update rolling context with new user message
     session_contexts[session_id].append(("human", user_message))
 
-    # --- Step 3 & 4: Extract Info & Save (Run in Background) ---
-    extracted_info_list = []
-    try:
-        # Call LLM to extract information
-        extraction_result = await info_extraction_chain.ainvoke({
-            "user_message": user_message,
-            "format_instructions": info_parser.get_format_instructions()
-        }, config={"callbacks": [langfuse_handler]})
-        extracted_info_list = extraction_result.get('information', [])
+    # --- Step 3 & 4: Extract Info & Save (Moved to run later in background) ---
+    # extracted_info_list = [] # Moved below
 
-        if extracted_info_list:
-            logger.info(f"Extracted {len(extracted_info_list)} info items for user '{username}'. Saving to Neo4j.")
-            # The parser already returns a list of dicts
-            # Directly pass the list of dictionaries
-            # await asyncio.create_task( # Don't run in background, await completion
-            await neo4j_service.save_personal_information(username=username, info_list=extracted_info_list)
-            # )
-            logger.info(f"Finished saving information for user '{username}'.") # Add log after saving
-        else:
-            logger.info(f"No personal information extracted for user '{username}'.")
-
-    except Exception as e:
-        logger.error(f"Error during information extraction or saving for user '{username}': {e}", exc_info=True)
-        # Continue processing the chat request even if extraction/saving fails
-
-    # --- Step 5, 6, 7: Extract Keywords, Search Neo4j, Summarize --- 
+    # --- Step 5, 6, 7: Extract Keywords, Search Neo4j, Summarize ---
     augmentation_context = ""
     try:
         # 5. Extract Keywords
@@ -173,6 +151,30 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
                     await create_chat_message(db, session_id, "agent", final_message)
                     # Update rolling context with new agent message
                     session_contexts[session_id].append(("agent", final_message))
+
+                    # --- Run Information Extraction & Saving in Background ---
+                    try:
+                        # Call LLM to extract information
+                        extraction_result = await info_extraction_chain.ainvoke({
+                            "user_message": user_message,
+                            "format_instructions": info_parser.get_format_instructions()
+                        }, config={"callbacks": [langfuse_handler]})
+                        extracted_info_list = extraction_result.get('information', [])
+
+                        if extracted_info_list:
+                            logger.info(f"Extracted {len(extracted_info_list)} info items for user '{username}' (background). Saving to Neo4j.")
+                            # Run saving in the background
+                            asyncio.create_task(
+                                neo4j_service.save_personal_information(username=username, info_list=extracted_info_list)
+                            )
+                            # Note: Logging completion here only means the task was scheduled.
+                        else:
+                            logger.info(f"No personal information extracted for user '{username}' (background).")
+
+                    except Exception as e:
+                        logger.error(f"Error during background information extraction or scheduling save for user '{username}': {e}", exc_info=True)
+                        # Do not block response return if background task fails
+
                     return {"session_id": session_id, "question": user_message, "ai_response": final_message}
                 else:
                     logger.error(f"Could not extract final message content from LLM response for user '{username}'. Response: {res['response']}")
