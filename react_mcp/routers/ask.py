@@ -10,7 +10,7 @@ from services.neo4j_service import neo4j_service
 from models.user import User # Assuming you have a User model for dependency
 from core.security import get_current_active_user # Function to get authenticated user
 from database import get_db
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from crud.chat import create_session, get_session, create_chat_message, get_sessions, get_messages, delete_session
 from main import langfuse_handler  # Import Langfuse callback handler
 
@@ -59,7 +59,7 @@ class ChatRequest(BaseModel):
     user_message: str
 
 @router.post("/api/chat/")
-async def ask(request: ChatRequest, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def ask(request: ChatRequest, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
     user_message = request.user_message
     username = current_user.username # Get username from authenticated user
 
@@ -67,17 +67,17 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
 
     # Handle chat session creation or retrieval
     if request.session_id:
-        session = get_session(db, request.session_id)
+        session = await get_session(db, request.session_id)
         if not session or session.user_id != current_user.id:
             raise HTTPException(status_code=404, detail="Chat session not found")
     else:
-        session = create_session(db, current_user.id)
+        session = await create_session(db, current_user.id)
     session_id = session.id
 
     # Initialize or load rolling context window
     if session_id not in session_contexts:
         if request.session_id:
-            past_messages = get_messages(db, session_id)
+            past_messages = await get_messages(db, session_id)
             session_contexts[session_id] = deque(
                 [(msg.sender, msg.content) for msg in past_messages[-MAX_CONTEXT_MESSAGES:]],
                 maxlen=MAX_CONTEXT_MESSAGES
@@ -86,36 +86,14 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
             session_contexts[session_id] = deque(maxlen=MAX_CONTEXT_MESSAGES)
 
     # Save user's message to the database
-    create_chat_message(db, session_id, "human", user_message)
+    await create_chat_message(db, session_id, "human", user_message)
     # Update rolling context with new user message
     session_contexts[session_id].append(("human", user_message))
 
-    # --- Step 3 & 4: Extract Info & Save (Run in Background) ---
-    extracted_info_list = []
-    try:
-        # Call LLM to extract information
-        extraction_result = await info_extraction_chain.ainvoke({
-            "user_message": user_message,
-            "format_instructions": info_parser.get_format_instructions()
-        }, config={"callbacks": [langfuse_handler]})
-        extracted_info_list = extraction_result.get('information', [])
+    # --- Step 3 & 4: Extract Info & Save (Moved to run later in background) ---
+    # extracted_info_list = [] # Moved below
 
-        if extracted_info_list:
-            logger.info(f"Extracted {len(extracted_info_list)} info items for user '{username}'. Saving to Neo4j.")
-            # The parser already returns a list of dicts
-            # Directly pass the list of dictionaries
-            # await asyncio.create_task( # Don't run in background, await completion
-            await neo4j_service.save_personal_information(username=username, info_list=extracted_info_list)
-            # )
-            logger.info(f"Finished saving information for user '{username}'.") # Add log after saving
-        else:
-            logger.info(f"No personal information extracted for user '{username}'.")
-
-    except Exception as e:
-        logger.error(f"Error during information extraction or saving for user '{username}': {e}", exc_info=True)
-        # Continue processing the chat request even if extraction/saving fails
-
-    # --- Step 5, 6, 7: Extract Keywords, Search Neo4j, Summarize --- 
+    # --- Step 5, 6, 7: Extract Keywords, Search Neo4j, Summarize ---
     augmentation_context = ""
     try:
         # 5. Extract Keywords
@@ -144,11 +122,13 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
     # Build conversation history prompt from rolling context
     history_text = ""
     if session_contexts[session_id]:
-        history_text = "\n".join([
+        # Add a prefix to indicate this is the history
+        history_text = "Conversation History:\n" + "\n".join([
             f"{'User' if sender=='human' else 'AI'}: {content}"
             for sender, content in session_contexts[session_id]
         ])
-    prompt_input = (history_text + "\n" if history_text else "") + user_message + augmentation_context
+    # Construct the full prompt: History (if any), new user message, and augmentation context
+    prompt_input = (history_text + "\n\n" if history_text else "") + f"User: {user_message}" + augmentation_context
     logger.debug(f"Augmented prompt for user '{username}': \n{prompt_input}")
 
     try:
@@ -168,9 +148,33 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
                 if final_message:
                     logger.info(f"Successfully generated final response for user '{username}' in session {session_id}")
                     # Save AI's response to the database
-                    create_chat_message(db, session_id, "agent", final_message)
+                    await create_chat_message(db, session_id, "agent", final_message)
                     # Update rolling context with new agent message
                     session_contexts[session_id].append(("agent", final_message))
+
+                    # --- Run Information Extraction & Saving in Background ---
+                    try:
+                        # Call LLM to extract information
+                        extraction_result = await info_extraction_chain.ainvoke({
+                            "user_message": user_message,
+                            "format_instructions": info_parser.get_format_instructions()
+                        }, config={"callbacks": [langfuse_handler]})
+                        extracted_info_list = extraction_result.get('information', [])
+
+                        if extracted_info_list:
+                            logger.info(f"Extracted {len(extracted_info_list)} info items for user '{username}' (background). Saving to Neo4j.")
+                            # Run saving in the background
+                            asyncio.create_task(
+                                neo4j_service.save_personal_information(username=username, info_list=extracted_info_list)
+                            )
+                            # Note: Logging completion here only means the task was scheduled.
+                        else:
+                            logger.info(f"No personal information extracted for user '{username}' (background).")
+
+                    except Exception as e:
+                        logger.error(f"Error during background information extraction or scheduling save for user '{username}': {e}", exc_info=True)
+                        # Do not block response return if background task fails
+
                     return {"session_id": session_id, "question": user_message, "ai_response": final_message}
                 else:
                     logger.error(f"Could not extract final message content from LLM response for user '{username}'. Response: {res['response']}")
@@ -212,12 +216,12 @@ class MessageResponse(BaseModel):
         orm_mode = True
 
 @router.get("/api/chat/sessions", response_model=List[SessionResponse], tags=["chat"])
-async def list_sessions(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def list_sessions(current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
     """List all chat sessions for the current user with first question and answer preview"""
-    db_sessions = get_sessions(db, current_user.id)
+    db_sessions = await get_sessions(db, current_user.id)
     sessions = []
     for sess in db_sessions:
-        msgs = get_messages(db, sess.id)
+        msgs = await get_messages(db, sess.id)
         # Get first human query and first AI response
         first_user = msgs[0].content if len(msgs) > 0 else ""
         first_ai = msgs[1].content if len(msgs) > 1 else ""
@@ -225,21 +229,21 @@ async def list_sessions(current_user: User = Depends(get_current_active_user), d
     return sessions
 
 @router.get("/api/chat/{session_id}/messages", response_model=List[MessageResponse], tags=["chat"])
-async def list_messages(session_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def list_messages(session_id: int, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
     """Retrieve all messages for a given chat session"""
-    session = get_session(db, session_id)
+    session = await get_session(db, session_id)
     if not session or session.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    messages = get_messages(db, session_id)
+    messages = await get_messages(db, session_id)
     return messages
 
 @router.delete("/api/chat/{session_id}", status_code=204, tags=["chat"])
-async def remove_session(session_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def remove_session(session_id: int, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
     """Delete a chat session and its messages"""
-    session = get_session(db, session_id)
+    session = await get_session(db, session_id)
     if not session or session.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    delete_session(db, session_id)
+    await delete_session(db, session_id)
     # Clear rolling context cache for deleted session
     if session_id in session_contexts:
         del session_contexts[session_id]

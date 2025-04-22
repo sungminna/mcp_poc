@@ -3,12 +3,9 @@
     import { onMount, afterUpdate, tick } from 'svelte';
     import { slide } from 'svelte/transition';
     import { goto } from '$app/navigation';
-
-    const sendIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" /></svg>`;
-    const hamburgerIcon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" width="24" height="24" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>`;
-    const backIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>`;
-    const searchIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" width="24" height="24"><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/></svg>`;
-    const menuIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><circle cx="12" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg>`;
+    import IconSend from '$lib/components/IconSend.svelte';
+    import IconHamburger from '$lib/components/IconHamburger.svelte';
+    import IconBack from '$lib/components/IconBack.svelte';
 
     type Message = {
         id: number;
@@ -276,7 +273,7 @@
         <header class="chat-header">
             <div class="header-left">
                 <button class="icon-button toggle-button" aria-label="Toggle sidebar" on:click={() => sidebarCollapsed = !sidebarCollapsed}>
-                    {@html hamburgerIcon}
+                    <IconHamburger />
                 </button>
                 <span class="header-title">{groupTitle}</span>
             </div>
@@ -332,7 +329,9 @@
                     }}
                 />
             </div>
-            <button class="icon-button action-button" on:click={sendMessage} disabled={!newMessageText.trim() || loadingAIResponse} aria-label="Send">{@html sendIcon}</button>
+            <button class="icon-button action-button" on:click={sendMessage} disabled={!newMessageText.trim() || loadingAIResponse} aria-label="Send">
+                <IconSend />
+            </button>
         </div>
         <footer class="chat-footer">
             Velt는 실수를 할 수 있습니다. 중요한 정보는 재차 확인하세요.

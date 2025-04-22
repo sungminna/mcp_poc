@@ -1,12 +1,19 @@
 import os
-from neo4j import GraphDatabase, Driver, Session, Transaction
+from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession
 from dotenv import load_dotenv
 import logging
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Tuple
 import asyncio
 from functools import partial
 from openai import AsyncOpenAI, OpenAIError
 from datetime import datetime
+import json # Added import for JSON serialization
+import redis.asyncio as aioredis  # Added async Redis client import
+
+# Import Milvus service - Remove unused fields if applicable
+# Updated import to remove non-existent names
+from .milvus_service import milvus_service, EMBEDDING_DIMENSION, OPENAI_EMBEDDING_MODEL
+# ... potentially remove MILVUS_NEO4J_NODE_ID_FIELD, MILVUS_NEO4J_REFS_FIELD if not used elsewhere
 
 load_dotenv()
 
@@ -16,150 +23,172 @@ NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 
-# --- OpenAI Embedding Configuration ---
-OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIMENSION = 1536
-
-VECTOR_INDEX_NAME = "information_embeddings"
-REL_VECTOR_INDEX_NAME = "relationship_embeddings" # Optional
-
 aclient = AsyncOpenAI()
 
-# --- Synchronous Neo4j Helper Functions (to be run in threads) ---
+# Initialize Redis client singleton for embedding cache
+_redis_client: aioredis.Redis | None = None
 
-def _sync_run_write_query(driver: Driver, query: str, params: Dict[str, Any] = None):
-    """Runs a write query within a session and returns the result summary."""
+def get_redis_client() -> aioredis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        _redis_client = aioredis.from_url(redis_url, encoding="utf-8", decode_responses=True)
+    return _redis_client
+
+# --- Async Neo4j Helper Functions ---
+async def _async_run_write_query(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
+    """Runs a write query within a session and returns the result summary asynchronously."""
     try:
-        with driver.session(database="neo4j") as session:
-            result = session.run(query, params)
-            summary = result.consume() # Consume result to get summary
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            summary = await result.consume()
             return summary
     except Exception as e:
-        logger.error(f"Sync write query failed: {query} | Params: {params} | Error: {e}", exc_info=True)
-        raise # Re-raise exception to be caught by asyncio.gather
-
-def _sync_fetch_single(driver: Driver, query: str, params: Dict[str, Any] = None):
-    """Runs a query and fetches a single record."""
-    try:
-        with driver.session(database="neo4j") as session:
-            result = session.run(query, params)
-            record = result.single()
-            return record
-    except Exception as e:
-        logger.error(f"Sync fetch single failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        logger.error(f"Async write query failed: {query} | Params: {params} | Error: {e}", exc_info=True)
         raise
 
-def _sync_fetch_list(driver: Driver, query: str, params: Dict[str, Any] = None):
-    """Runs a query and fetches a list of records."""
+async def _async_fetch_single(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
+    """Runs a query and fetches a single record asynchronously."""
     try:
-        with driver.session(database="neo4j") as session:
-            result = session.run(query, params)
-            # Correct way to get all records as a list from sync Result object
-            records = list(result) 
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            record = await result.single()
+            return record
+    except Exception as e:
+        logger.error(f"Async fetch single failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        raise
+
+async def _async_fetch_list(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
+    """Runs a query and fetches a list of records asynchronously."""
+    try:
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            records = [record async for record in result]
             return records
     except Exception as e:
-        logger.error(f"Sync fetch list failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        logger.error(f"Async fetch list failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        raise
+
+async def _async_create_node_get_id(driver: AsyncDriver, query: str, params: Dict[str, Any] = None) -> int | None:
+    """Runs a query to create/merge a node and returns its internal Neo4j ID asynchronously."""
+    try:
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            record = await result.single()
+            return record[0] if record else None
+    except Exception as e:
+        logger.error(f"Async create node get ID failed: {query} | Params: {params} | Error: {e}", exc_info=True)
+        raise
+
+async def _async_create_relationship_get_id(driver: AsyncDriver, query: str, params: Dict[str, Any] = None) -> int | None:
+    """Runs a query to create/merge a relationship and returns its internal Neo4j ID asynchronously."""
+    try:
+        async with driver.session(database="neo4j") as session:
+            result = await session.run(query, params)
+            record = await result.single()
+            return record[0] if record else None
+    except Exception as e:
+        logger.error(f"Async create relationship get ID failed: {query} | Params: {params} | Error: {e}", exc_info=True)
         raise
 
 # --- Neo4jService Class --- 
 
 class Neo4jService:
-    _driver: Driver | None = None
+    _driver: AsyncDriver | None = None
+    # Added asyncio Lock for Milvus check/insert logic
+    _milvus_insert_lock = asyncio.Lock()
 
-    def connect(self):
+    async def connect(self):
         if self._driver is None:
             try:
                 logger.info(f"Attempting to connect to Neo4j at {NEO4J_URI}")
-                self._driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-                self._driver.verify_connectivity()
+                self._driver = AsyncGraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+                await self._driver.verify_connectivity()
                 logger.info("Neo4j connection successful.")
             except Exception as e:
                 logger.error(f"Failed to connect to Neo4j or verify connectivity: {e}", exc_info=True)
                 self._driver = None
                 raise
 
-    def close(self):
+    async def close(self):
         if self._driver is not None:
-            self._driver.close()
+            await self._driver.close()
             logger.info("Neo4j connection closed.")
             self._driver = None
 
-    def get_driver(self) -> Driver:
+    def get_driver(self) -> AsyncDriver:
         if self._driver is None:
             raise ConnectionError("Neo4j driver is not initialized. Call connect() first.")
         return self._driver
 
     async def generate_embedding(self, text: str) -> list[float]:
-        """Generates embedding for the given text using OpenAI API."""
+        """Generates embedding for the given text using OpenAI API with Redis caching."""
         if not text:
-            # Return zero vector for empty input
             logger.warning("generate_embedding called with empty text.")
             return [0.0] * EMBEDDING_DIMENSION
-        
-        # OpenAI API recommendation: replace newlines with spaces
-        text = text.replace("\n", " ")
-        
+
+        text_key = text.replace("\n", " ").strip()
+        cache_key = f"kw_embedding:{text_key}"
+        redis_client = get_redis_client()
+        try:
+            cached = await redis_client.get(cache_key)
+            if cached:
+                logger.debug(f"Embedding cache hit for text: '{text_key[:50]}...'")
+                return json.loads(cached)
+        except Exception as e:
+            logger.error(f"Redis cache get error for key {cache_key}: {e}", exc_info=True)
+
         try:
             response = await aclient.embeddings.create(
-                input=[text], # API expects a list of strings
+                input=[text_key],
                 model=OPENAI_EMBEDDING_MODEL
             )
             embedding = response.data[0].embedding
-            # logger.debug(f"Generated OpenAI embedding for text: '{text[:50]}...'")
+            try:
+                await redis_client.set(cache_key, json.dumps(embedding), ex=86400)  # cache for 1 day
+            except Exception as e:
+                logger.error(f"Redis cache set error for key {cache_key}: {e}", exc_info=True)
             return embedding
         except OpenAIError as e:
-            logger.error(f"OpenAI API error generating embedding for text '{text[:50]}...': {e}")
-            # Decide how to handle API errors - raise, return zero vector, etc.
-            # Returning zero vector might hide issues but allows processing to continue.
-            # raise  # Or re-raise a custom exception
-            return [0.0] * EMBEDDING_DIMENSION # Fallback to zero vector
+            logger.error(f"OpenAI API error generating embedding for text '{text_key[:50]}...': {e}")
+            return [0.0] * EMBEDDING_DIMENSION
         except Exception as e:
             logger.error(f"Unexpected error generating embedding: {e}", exc_info=True)
-            return [0.0] * EMBEDDING_DIMENSION # Fallback
+            return [0.0] * EMBEDDING_DIMENSION
 
     async def create_indexes(self):
-        """Creates necessary constraints and vector indexes using sync calls in threads."""
+        """Creates necessary constraints (vector indexes are now in Milvus)."""
         driver = self.get_driver()
         
-        constraint_query = "CREATE CONSTRAINT user_username IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE"
-        index_query = f"""
-            CREATE VECTOR INDEX {VECTOR_INDEX_NAME} IF NOT EXISTS
-            FOR (i:Information) ON (i.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {EMBEDDING_DIMENSION},
-                `vector.similarity_function`: 'cosine'
-            }} }}
-        """
+        constraint_queries = [
+            "CREATE CONSTRAINT user_username IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE",
+            "CREATE CONSTRAINT information_value IF NOT EXISTS FOR (i:Information) REQUIRE i.value IS UNIQUE", # Reverted to value only constraint
+            # "CREATE CONSTRAINT information_key_value IF NOT EXISTS FOR (i:Information) REQUIRE (i.key, i.value) IS UNIQUE" # Removed composite constraint
+        ]
+        # Removed Neo4j vector index creation queries
         
         try:
-            # Run constraint creation in a separate thread
-            await asyncio.to_thread(_sync_run_write_query, driver, constraint_query)
-            logger.info("Constraint 'user_username' creation attempted (run in thread).")
-        except Exception as e:
-            # Error is already logged in _sync_run_write_query
-            logger.warning(f"Constraint creation failed or thread execution error: {e}")
+            # Run both constraint creations
+            tasks = [_async_run_write_query(driver, query) for query in constraint_queries]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Log results
+            for query, result in zip(constraint_queries, results):
+                constraint_name = query.split(" ")[2] # Extract name for logging
+                if isinstance(result, Exception):
+                     logger.warning(f"Constraint '{constraint_name}' creation failed or thread execution error: {result}")
+                else:
+                     logger.info(f"Constraint '{constraint_name}' creation attempted (run in thread).")
 
-        try:
-            # Run index creation in a separate thread
-            await asyncio.to_thread(_sync_run_write_query, driver, index_query)
-            logger.info(f"Vector index '{VECTOR_INDEX_NAME}' creation attempted (run in thread).")
+            # Original logging kept for reference, can be removed if above is sufficient
+            # await asyncio.to_thread(_sync_run_write_query, driver, constraint_query)
+            # logger.info("Constraint 'user_username' creation attempted (run in thread).")
         except Exception as e:
-            logger.error(f"Vector index creation failed or thread execution error: {e}")
+            # This catch might be redundant now with gather handling exceptions, but kept for safety
+            logger.warning(f"Error during constraint creation process: {e}")
+            # Continue if constraint fails?
 
-        # Create relationship vector index
-        rel_index_query = f"""
-            CREATE VECTOR INDEX {REL_VECTOR_INDEX_NAME} IF NOT EXISTS
-            FOR ()-[r:RELATES_TO]-() ON (r.embedding)
-            OPTIONS {{ indexConfig: {{
-                `vector.dimensions`: {EMBEDDING_DIMENSION},
-                `vector.similarity_function`: 'cosine'
-            }} }}
-        """
-        try:
-            await asyncio.to_thread(_sync_run_write_query, driver, rel_index_query)
-            logger.info(f"Vector index '{REL_VECTOR_INDEX_NAME}' creation attempted (run in thread).")
-        except Exception as e:
-            logger.error(f"Relationship vector index creation failed: {e}")
+        logger.info("Neo4j index creation step skipped (vector indexes moved to Milvus).")
 
     async def add_user(self, username: str, user_info: dict):
         """Creates or updates a User node using sync calls in threads."""
@@ -173,253 +202,390 @@ class Neo4jService:
         props = {"email": user_info.get("email")}
         props = {k: v for k, v in props.items() if v is not None}
         try:
-            # Run the fetch single operation in a thread
-            record = await asyncio.to_thread(
-                _sync_fetch_single, driver, query, params={"username": username, "props": props}
-            )
+            record = await _async_fetch_single(driver, query, params={"username": username, "props": props})
             if record:
                 logger.info(f"User node '{username}' created or updated in Neo4j (run in thread).")
-                return record[0] # Return the node from the record
+                return record[0] # Return the node object/dict from the record
             else:
-                logger.warning(f"User node '{username}' could not be created/updated (query returned no records).")
+                logger.warning(f"User node '{username}' could not be created/updated.")
                 return None
         except Exception as e:
             logger.error(f"Error adding user '{username}' via thread: {e}", exc_info=True)
             return None
 
     async def save_personal_information(self, username: str, info_list: list[dict]):
-        """Saves extracted personal information using sync calls in threads."""
+        """Saves info to Neo4j, checks Milvus for existing text vectors, 
+           saves new vectors to Milvus, and links Neo4j elements to Milvus IDs."""
         driver = self.get_driver()
+        
+        # 1. Check if user exists (remains the same)
         user_check_query = "MATCH (u:User {username: $username}) RETURN u.username"
-        create_info_query = (
-            "MATCH (u:User {username: $username}) "
-            "MERGE (i:Information {key: $key, value: $value}) "
-            "ON CREATE SET i.embedding = $embedding, i.createdAt = timestamp() "
-            "ON MATCH SET i.embedding = $embedding, i.updatedAt = timestamp() "
-            "MERGE (u)-[r:RELATES_TO {value: $relationship_verb}]->(i) "
-            "ON CREATE SET r.lifetime = $lifetime, r.embedding = $rel_embedding, r.createdAt = timestamp() "
-            "ON MATCH SET r.lifetime = $lifetime, r.embedding = $rel_embedding, r.updatedAt = timestamp() "
-            # No RETURN needed for run_write_query if only summary is checked
-        )
-
         try:
-            # Verify user exists first in a thread
-            user_record = await asyncio.to_thread(
-                _sync_fetch_single, driver, user_check_query, params={"username": username}
-            )
+            user_record = await _async_fetch_single(driver, user_check_query, params={"username": username})
             if not user_record:
-                logger.error(f"User '{username}' not found in Neo4j. Cannot save personal information.")
+                logger.error(f"User '{username}' not found in Neo4j. Cannot save info.")
                 return False
         except Exception as e:
-            logger.error(f"Error checking user '{username}' existence via thread: {e}", exc_info=True)
+            logger.error(f"Error checking user '{username}': {e}", exc_info=True)
             return False
 
-        # --- Generate embeddings (remains async) --- 
-        embedding_coroutines = []
+        # --- Refactored Processing Logic --- 
+        neo4j_update_tasks = [] # Tasks to update Neo4j with Milvus IDs later
+        milvus_insertion_data = [] # Data for new vectors to insert into Milvus
+        embedding_cache = {} # Cache generated embeddings for reuse within this request
+        milvus_id_cache = {} # Cache Milvus IDs found for existing texts
+        processed_neo4j_ids = {} # Track Neo4j IDs created: {('node', text): id, ('rel', text): id}
+
+        # --- Pass 1: Check Milvus, generate embeddings for new texts, create Neo4j elements --- 
+        logger.debug(f"Starting Pass 1 for user '{username}': Check Milvus, Embed new, Create Neo4j")
+        
+        # Collect all unique texts that might need checking/embedding first
+        texts_to_potentially_process = set()
         valid_info_list = []
         for info in info_list:
-            key = info.get("key")
+            key_str = info.get("key")
             value = info.get("value")
             relationship_verb = info.get("relationship")
-            if not all([key, value, relationship_verb]):
-                logger.warning(f"Skipping incomplete information item for user '{username}': {info}")
+            if not all([key_str, value, relationship_verb]):
+                logger.warning(f"Skipping incomplete item for user '{username}': {info}")
                 continue
-            valid_info_list.append(info)
-            embedding_coroutines.append(self.generate_embedding(f"{key}: {value}"))
-            embedding_coroutines.append(self.generate_embedding(relationship_verb))
-        
-        if not valid_info_list:
-            return True # No valid items to save
+            valid_info_list.append(info) # Keep track of valid items
+            texts_to_potentially_process.add(value) # Node text
+            texts_to_potentially_process.add(relationship_verb) # Relationship text
+            texts_to_potentially_process.add(key_str) # Key/Category text
 
-        try:
-            embeddings = await asyncio.gather(*embedding_coroutines)
-        except Exception as e:
-             logger.error(f"Error generating embeddings for user '{username}': {e}", exc_info=True)
-             return False # Fail if embedding generation fails
-        # --- End Embedding Generation ---
-
-        # --- Prepare and run save tasks in threads --- 
-        save_tasks = []
-        embedding_idx = 0
-        for info in valid_info_list:
-            node_embedding = embeddings[embedding_idx]
-            rel_embedding = embeddings[embedding_idx + 1]
-            embedding_idx += 2
-
-            if not any(node_embedding) or not any(rel_embedding):
-                 logger.error(f"Failed to generate embeddings for info '{info.get("key")}=' '{info.get("value")}' for user '{username}'. Skipping save.")
-                 continue # Skip if embedding failed for this item
-
-            params = {
-                "username": username,
-                "key": info.get("key"),
-                "value": info.get("value"),
-                "embedding": node_embedding,
-                "relationship_verb": info.get("relationship"),
-                "rel_embedding": rel_embedding,
-                "lifetime": info.get("lifetime", "permanent")
-            }
-            # Create a task to run the sync write query in a thread
-            save_tasks.append(
-                asyncio.to_thread(_sync_run_write_query, driver, create_info_query, params=params)
-            )
-
-        if not save_tasks:
-             logger.info(f"No valid information items with successful embeddings to save for user '{username}'.")
-             return True # Nothing to save
-
-        success_count = 0
-        try:
-            # Run all save tasks concurrently in threads
-            results = await asyncio.gather(*save_tasks, return_exceptions=True)
+        # Determine which texts actually need embedding (check Milvus within lock)
+        embeddings_needed = {} # {text: type}
+        async with self._milvus_insert_lock: # Acquire lock
+            logger.debug(f"Acquired lock to check Milvus for {len(texts_to_potentially_process)} potential texts.")
+            # Check local cache first (in case texts repeat within the batch)
+            texts_to_check_in_milvus = {t for t in texts_to_potentially_process if t not in milvus_id_cache}
             
-            # Check results for success/failure
-            for i, result_or_exception in enumerate(results):
-                info_item = valid_info_list[i]
-                if isinstance(result_or_exception, Exception):
-                    # Error already logged in helper
-                    logger.error(f"Thread execution failed for save task '{info_item.get("key")}=' '{info_item.get("value")}': {result_or_exception}")
-                elif result_or_exception: # Check if summary object was returned
-                     # Check summary counters if needed (e.g., result_or_exception.counters)
-                     # If no exception, assume success for now
-                     success_count += 1
-                     # logger.info(f"Successfully saved info '{info_item.get("key")}=' '{info_item.get("value")}' (thread)")
-                else:
-                     logger.warning(f"Save task for '{info_item.get("key")}=' '{info_item.get("value")}' returned None unexpectedly.")
+            if texts_to_check_in_milvus:
+                # Batch check would be ideal, doing sequential for now
+                check_tasks = {text: milvus_service.get_vector_id_by_text(text) for text in texts_to_check_in_milvus}
+                results = await asyncio.gather(*check_tasks.values(), return_exceptions=True)
+                
+                for i, text in enumerate(check_tasks.keys()):
+                    result = results[i]
+                    if isinstance(result, Exception):
+                        logger.error(f"Error checking Milvus for text '{text}': {result}")
+                        # Decide how to handle - skip text? Assume not present?
+                        # Assuming not present for now to allow potential insertion
+                        embeddings_needed[text] = None # Mark as needing embedding, type resolved later
+                    elif result is not None:
+                        milvus_id_cache[text] = result # Cache existing ID
+                        logger.debug(f"Milvus check found existing ID for text: '{text}'")
+                    else:
+                        # Text is new according to Milvus
+                        embeddings_needed[text] = None # Mark as needing embedding, type resolved later
+                        logger.debug(f"Milvus check found no vector for text: '{text}'")
+            logger.debug(f"Releasing lock. {len(embeddings_needed)} texts marked for potential embedding.")
 
-        except Exception as e:
-            logger.error(f"Unexpected error during batch saving via threads for user '{username}': {e}", exc_info=True)
-        
-        logger.info(f"Attempted to save {len(valid_info_list)} items for user '{username}' via threads. Succeeded: {success_count}")
-        return success_count == len(valid_info_list)
+        # --- Generate Embeddings (Outside Lock) --- 
+        if embeddings_needed:
+            embedding_tasks = {}
+            for text in embeddings_needed.keys():
+                if text not in embedding_cache: # Avoid re-generating
+                    embedding_tasks[text] = self.generate_embedding(text)
+            
+            if embedding_tasks:
+                logger.debug(f"Generating embeddings for {len(embedding_tasks)} texts.")
+                embedding_results = await asyncio.gather(*embedding_tasks.values(), return_exceptions=True)
+                for i, text in enumerate(embedding_tasks.keys()):
+                    result = embedding_results[i]
+                    if isinstance(result, Exception) or not any(result):
+                        logger.error(f"Failed to generate embedding for text '{text}': {result}. Will not add to Milvus.")
+                        # Remove from embeddings_needed if failed?
+                        if text in embeddings_needed:
+                             del embeddings_needed[text] 
+                    else:
+                        embedding_cache[text] = result
+                        logger.debug(f"Successfully generated embedding for text: '{text}'")
+            else:
+                logger.debug("No new embeddings needed (all texts needing embedding were already cached).")
+        else:
+            logger.debug("No texts needed embedding generation.")
+
+        # --- Process each valid info item: Create Neo4j & Prepare Milvus Insert Data --- 
+        for info in valid_info_list:
+            key_str = info.get("key")
+            value = info.get("value")
+            relationship_verb = info.get("relationship")
+            lifetime = info.get("lifetime", "permanent")
+            node_text = value
+            rel_text = relationship_verb
+            
+            # --- Create/Merge Neo4j Elements --- 
+            neo4j_node_id = None
+            neo4j_rel_id = None
+            neo4j_key_node_id = None
+            try:
+                # Step 2a: Node
+                create_node_query = (
+                    "MERGE (i:Information {key: $key, value: $value}) "
+                    "ON CREATE SET i.createdAt = timestamp(), i.children = [] "
+                    "ON MATCH SET i.updatedAt = timestamp() "
+                    "RETURN elementId(i)"
+                )
+                node_params = {"key": key_str, "value": value}
+                neo4j_node_id = await _async_create_node_get_id(driver, create_node_query, node_params)
+                if neo4j_node_id is None: raise ValueError(f"Failed to create/get node ID for {value}")
+
+                # Step 2b: Relationship
+                create_rel_query = (
+                    "MATCH (u:User {username: $username}) "
+                    "MATCH (i:Information) WHERE elementId(i) = $node_id " 
+                    "MERGE (u)-[r:RELATES_TO {value: $relationship_verb}]->(i) "
+                    "ON CREATE SET r.lifetime = $lifetime, r.createdAt = timestamp() "
+                    "ON MATCH SET r.lifetime = $lifetime, r.updatedAt = timestamp() " 
+                    "RETURN elementId(r)"
+                )
+                rel_params = {"username": username, "node_id": neo4j_node_id, "relationship_verb": relationship_verb, "lifetime": lifetime}
+                neo4j_rel_id = await _async_create_relationship_get_id(driver, create_rel_query, rel_params)
+                if neo4j_rel_id is None: logger.error(f"Failed to create/get relationship ID for {rel_text} -> {node_text}") # Log error but continue
+
+                # Step 2c: Key Node & Hierarchy
+                key_node_key_prop = "Category"
+                create_key_node_query = (
+                    "MERGE (k:Information {key: $key_node_key, value: $key_value}) "
+                    "ON CREATE SET k.createdAt = timestamp(), k.children = [] "
+                    "ON MATCH SET k.updatedAt = timestamp() "
+                    "RETURN elementId(k)"
+                )
+                key_node_params = {"key_node_key": key_node_key_prop, "key_value": key_str}
+                neo4j_key_node_id = await _async_create_node_get_id(driver, create_key_node_query, key_node_params)
+                if neo4j_key_node_id is None: raise ValueError(f"Failed to create/get key node ID for {key_str}")
+                
+                create_hierarchy_rel_query = (
+                    "MATCH (i:Information) WHERE elementId(i) = $node_id "
+                    "MATCH (k:Information) WHERE elementId(k) = $key_node_id "
+                    "MERGE (i)-[h:HAS_CATEGORY]->(k) "
+                    "ON CREATE SET h.createdAt = timestamp() "
+                    "ON MATCH SET h.updatedAt = timestamp()"
+                )
+                hierarchy_rel_params = {"node_id": neo4j_node_id, "key_node_id": neo4j_key_node_id}
+                await _async_run_write_query(driver, create_hierarchy_rel_query, hierarchy_rel_params)
+
+            except Exception as e:
+                logger.error(f"Error during Neo4j element creation/linking for info key='{key_str}', value='{value}': {e}. Skipping Milvus prep for this item.", exc_info=True)
+                continue # Skip Milvus prep for this item if Neo4j failed
+
+            # --- Prepare Milvus Insertion Data (Add if new & embedding succeeded) ---
+            if node_text in embeddings_needed and node_text in embedding_cache:
+                 milvus_insertion_data.append({
+                     "embedding": embedding_cache[node_text],
+                     "element_type": "Node",
+                     "original_text": node_text.lower()
+                 })
+                 del embeddings_needed[node_text] # Mark as processed for insertion
+                 
+            if rel_text in embeddings_needed and rel_text in embedding_cache and neo4j_rel_id is not None: # Check rel was created
+                 milvus_insertion_data.append({
+                     "embedding": embedding_cache[rel_text],
+                     "element_type": "Relationship",
+                     "original_text": rel_text.lower()
+                 })
+                 del embeddings_needed[rel_text] # Mark as processed
+                 
+            if key_str in embeddings_needed and key_str in embedding_cache:
+                 milvus_insertion_data.append({
+                     "embedding": embedding_cache[key_str],
+                     "element_type": "Node", 
+                     "original_text": key_str.lower()
+                 })
+                 del embeddings_needed[key_str] # Mark as processed
+
+        # --- Pass 2: Batch Insert New Vectors into Milvus, filtering out duplicates ---
+        if milvus_insertion_data:
+            # Deduplicate insertion data by original_text
+            deduped_items = {item["original_text"].lower(): item for item in milvus_insertion_data}.values()
+            logger.debug(f"Attempting to insert {len(deduped_items)} unique new vectors into Milvus.")
+            # Filter out items that already exist in Milvus by exact text match
+            filtered_items = []
+            for item in deduped_items:
+                text = item["original_text"].lower()
+                item["original_text"] = text
+                try:
+                    existing_id = await milvus_service.get_vector_id_by_text(text)
+                    if existing_id is not None:
+                        logger.debug(f"Skipping insertion for '{text}' because it already exists in Milvus.")
+                        continue
+                except Exception as e:
+                    logger.error(f"Error checking Milvus for existing text '{text}': {e}", exc_info=True)
+                filtered_items.append(item)
+            if filtered_items:
+                logger.debug(f"{len(filtered_items)} vectors remain after filtering existing duplicates.")
+                try:
+                    inserted_ids = await milvus_service.insert_vectors(filtered_items)
+                    # Logging success/failure based on count
+                    if inserted_ids and len(inserted_ids) == len(filtered_items):
+                        logger.info(f"Successfully inserted {len(inserted_ids)} new vectors into Milvus.")
+                    else:
+                        logger.error(f"Milvus insertion failed or returned incorrect ID count. Expected {len(filtered_items)}, got {len(inserted_ids) if inserted_ids else 0}.")
+                except Exception as e:
+                    logger.error(f"Failed during Milvus batch insertion: {e}", exc_info=True)
+            else:
+                logger.debug("No new vectors to insert after filtering existing duplicates.")
+        else:
+            logger.debug("Pass 2 Skipped: No new vectors needed insertion.")
+
+        logger.info(f"Finished saving personal information for user '{username}'.")
+        return True # Indicate overall process completion
 
     async def find_similar_information(self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75) -> List[str]:
-        """Finds information related to keywords using sync calls in threads."""
+        """Finds info via Milvus, queries Neo4j for user nodes, expands via children, returns context."""
         if not keywords:
             return []
 
         driver = self.get_driver()
+        logger.info(f"Finding similar info for '{username}' via keywords: {keywords}, using 1-hop children expansion.")
 
-        # First, check if the User node exists and has any relationships at all
-        user_check_query = """
-            MATCH (u:User {username: $username})
-            OPTIONAL MATCH (u)-[r]->(i:Information)
-            RETURN u.username AS username, count(r) AS rel_count
-        """
-        
-        try:
-            # Check if user has any information nodes connected
-            user_record = await asyncio.to_thread(
-                _sync_fetch_single, driver, user_check_query, params={"username": username}
-            )
-            
-            if not user_record:
-                logger.warning(f"User '{username}' not found in Neo4j database. Cannot search for similar information.")
-                return []
-                
-            rel_count = user_record["rel_count"]
-            if rel_count == 0:
-                logger.info(f"User '{username}' has no personal information stored yet. Skipping vector search.")
-                return []
-                
-            logger.info(f"User '{username}' has {rel_count} information relationships. Proceeding with search.")
-        except Exception as e:
-            logger.error(f"Error checking user and relationships for '{username}': {e}", exc_info=True)
-            # Continue execution - attempt to search anyway
-        
-        # Generate embeddings (async)
+        # 1. Generate embeddings for keywords (remains same)
         embedding_tasks = [self.generate_embedding(kw) for kw in keywords]
         keyword_embeddings = await asyncio.gather(*embedding_tasks)
-
         valid_embeddings = [emb for emb in keyword_embeddings if any(emb)]
         if not valid_embeddings:
-            logger.warning(f"No valid keyword embeddings generated for user '{username}'. Keywords: {keywords}")
+            logger.warning(f"No valid keyword embeddings for '{username}'. Keywords: {keywords}")
             return []
 
-        query = f"""
-            MATCH (u:User {{username: $username}})
-            CALL db.index.vector.queryNodes('{VECTOR_INDEX_NAME}', $top_k, $embedding) YIELD node AS i, score
-            WHERE score >= $similarity_threshold
-            MATCH (u)-[r:RELATES_TO]->(i)
-            WITH DISTINCT u.username AS username, r.value AS relationship, i.key AS key, i.value AS value, i.createdAt AS created_at, r.lifetime AS lifetime, score
-            RETURN username, relationship, key, value, created_at, lifetime, score
-            ORDER BY score DESC
-            LIMIT $top_k
-        """
-
-        # Also search over relationships vector index
-        rel_query = f"""
-            MATCH (u:User {{username: $username}})
-            CALL db.index.vector.queryRelationships('{REL_VECTOR_INDEX_NAME}', $top_k, $embedding) YIELD relationship AS r, score
-            WHERE score >= $similarity_threshold
-            MATCH (u)-[r]->(i:Information)
-            WITH DISTINCT u.username AS username, r.value AS relationship, i.key AS key, i.value AS value, i.createdAt AS created_at, r.lifetime AS lifetime, score
-            RETURN username, relationship, key, value, created_at, lifetime, score
-            ORDER BY score DESC
-            LIMIT $top_k
-        """
-
-        all_results_list = []
-        search_tasks = []
-        for embedding in valid_embeddings:
-            params = {
-                "username": username,
-                "embedding": embedding,
-                "top_k": top_k,
-                "similarity_threshold": similarity_threshold
-            }
-            # Node-based vector search
-            search_tasks.append(
-                asyncio.to_thread(_sync_fetch_list, driver, query, params=params)
-            )
-            # Relationship-based vector search
-            search_tasks.append(
-                asyncio.to_thread(_sync_fetch_list, driver, rel_query, params=params)
-            )
-        
+        # 2. Search Milvus for relevant text concepts (remains same)
+        relevant_texts = []
         try:
-            # Run all search tasks concurrently in threads
-            task_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-            for i, result_or_exception in enumerate(task_results):
-                if isinstance(result_or_exception, Exception):
-                    # Error logged in helper, but don't treat it as fatal
-                    logger.warning(f"Thread execution failed for vector search {i}: {result_or_exception}")
-                    continue
-                elif result_or_exception is not None: # Check if list of records was returned
-                    all_results_list.extend(result_or_exception)
-                else:
-                     logger.debug(f"Vector search task {i} returned None unexpectedly.")
+            milvus_results = await milvus_service.search_vectors(
+                valid_embeddings, top_k=top_k * 3, # Fetch more concepts initially
+                similarity_threshold=similarity_threshold
+            )
+            if not milvus_results:
+                logger.info(f"No similar text concepts found in Milvus.")
+                return []
+            relevant_texts = list(set([hit['original_text'] for hit in milvus_results if hit.get('original_text')]))
+            logger.info(f"Milvus found {len(relevant_texts)} relevant text concepts: {relevant_texts}")
         except Exception as e:
-            logger.error(f"Unexpected error during batched vector search via threads for user '{username}': {e}", exc_info=True)
-            # Continue to process any results we got
+            logger.error(f"Error searching Milvus concepts: {e}", exc_info=True)
+            return []
 
-        # Process and format results (remains the same)
-        processed_results = {}
-        for record in all_results_list:
-            rel_key = (record["relationship"], record["key"], record["value"])
-            if rel_key not in processed_results or record["score"] > processed_results[rel_key]["score"]:
-                processed_results[rel_key] = record
+        # 3. Neo4j Query 1: Find initial nodes and their children based on Milvus texts
+        child_keywords = set() 
+        initial_neo4j_data = []
+        if relevant_texts:
+            try:
+                # Query to find initial nodes connected to the user matching Milvus texts
+                # AND retrieve their children property
+                query1 = """
+                MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
+                WHERE r.value IN $texts OR i.value IN $texts
+                RETURN 
+                    elementId(r) AS rel_id, 
+                    r.value AS relationship, 
+                    i.key AS node_key, 
+                    i.value AS node_value, 
+                    i.createdAt AS created_at, 
+                    r.lifetime AS lifetime,
+                    i.children AS children // Get children list
+                ORDER BY i.createdAt DESC
+                LIMIT $limit
+                """
+                query1_results = await _async_fetch_list(driver, query1,
+                    params={"username": username, "texts": relevant_texts, "limit": top_k * 5} # Fetch more initially
+                )
+                
+                if query1_results:
+                    initial_neo4j_data.extend(query1_results)
+                    # Extract child keywords from results
+                    for record in query1_results:
+                        children_list = record.get("children")
+                        if children_list and isinstance(children_list, list):
+                            for child in children_list:
+                                if isinstance(child, str) and child.strip():
+                                    child_keywords.add(child.strip())
+                    logger.info(f"Query 1 found {len(initial_neo4j_data)} initial nodes/rels. Extracted children: {child_keywords}")
+                else:
+                    logger.info(f"Query 1 found no initial nodes/rels matching Milvus texts for user '{username}'.")
 
-        sentences = []
-        for record in processed_results.values():
-            created_at = record.get("created_at")
-            # convert timestamp in ms to ISO string
+            except Exception as e:
+                logger.error(f"Error in Neo4j Query 1 for user '{username}': {e}", exc_info=True)
+                # Continue without initial results if query fails?
+
+        # 4. Neo4j Query 2: Find nodes based on child keywords
+        child_neo4j_data = []
+        if child_keywords:
+            try:
+                # Query to find nodes connected to the user matching child keywords
+                query2 = """
+                MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
+                WHERE i.value IN $child_keywords // Match node value against children
+                RETURN 
+                    elementId(r) AS rel_id, 
+                    r.value AS relationship, 
+                    i.key AS node_key, 
+                    i.value AS node_value, 
+                    i.createdAt AS created_at, 
+                    r.lifetime AS lifetime
+                    // No need to return i.children here
+                ORDER BY i.createdAt DESC
+                LIMIT $limit
+                """
+                query2_results = await _async_fetch_list(driver, query2,
+                    params={"username": username, "child_keywords": list(child_keywords), "limit": top_k * 3}
+                )
+                if query2_results:
+                    child_neo4j_data.extend(query2_results)
+                    logger.info(f"Query 2 found {len(child_neo4j_data)} nodes/rels matching child keywords.")
+                else:
+                     logger.info(f"Query 2 found no nodes/rels matching child keywords for user '{username}'.")
+            except Exception as e:
+                logger.error(f"Error in Neo4j Query 2 (children) for user '{username}': {e}", exc_info=True)
+
+        # 5. Combine, Deduplicate, and Format Results
+        final_results_map = {}
+        # Process initial results first
+        for record in initial_neo4j_data:
+            rel_id = record["rel_id"]
+            if rel_id not in final_results_map: # Use relationship ID as unique key for now
+                final_results_map[rel_id] = dict(record)
+        # Add results from child keyword search, potentially overwriting if rel_id collided (unlikely but possible)
+        for record in child_neo4j_data:
+             rel_id = record["rel_id"]
+             if rel_id not in final_results_map:
+                 final_results_map[rel_id] = dict(record)
+
+        # Sort combined results (optional, using node creation time as primary sort key from queries)
+        # sorted_results = sorted(final_results_map.values(), key=lambda x: x.get("created_at", 0), reverse=True)
+        # Or just use the map directly as order might be good enough from individual queries
+        sorted_results = list(final_results_map.values())
+
+        output_sentences = []
+        seen_tuples = set() # Deduplicate based on core info
+        for record_dict in sorted_results:
+            if len(output_sentences) >= top_k:
+                break
+
+            rel_verb = record_dict.get('relationship', '').lower()
+            node_val = record_dict.get('node_value', '').lower()
+            node_key = record_dict.get('node_key', '').lower()
+            info_tuple = (rel_verb, node_val, node_key)
+
+            if not all([rel_verb, node_val]) or info_tuple in seen_tuples:
+                continue 
+            seen_tuples.add(info_tuple)
+
+            created_at = record_dict.get("created_at")
             if isinstance(created_at, (int, float)):
-                try:
-                    created_iso = datetime.fromtimestamp(created_at / 1000).isoformat()
-                except Exception:
-                    created_iso = str(created_at)
-            else:
-                created_iso = str(created_at)
-            lifetime = record.get("lifetime", "")
+                try: created_iso = datetime.fromtimestamp(created_at / 1000).isoformat()
+                except Exception: created_iso = str(created_at)
+            else: created_iso = str(created_at)
+            lifetime = record_dict.get("lifetime", "")
+
             sentence = (
-                f"You {record['relationship'].lower()} {record['value']} ({record['key']}), "
-                f"recorded at {created_iso}, lifetime {lifetime}."
+                f"You {rel_verb} {node_val}, "
+                f"recorded around {created_iso}, lifetime {lifetime}."
             )
             sentence = sentence[0].upper() + sentence[1:]
-            sentences.append(sentence)
+            output_sentences.append(sentence)
 
-        return sentences[:top_k]
+        logger.info(f"Formatted {len(output_sentences)} unique context sentences after children expansion for user '{username}'.")
+        return output_sentences
 
 # Global instance
 neo4j_service = Neo4jService()
