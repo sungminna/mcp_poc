@@ -1,7 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, Request
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager # Import asynccontextmanager
 import logging # Import logging
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware import Middleware
+from starlette.middleware.timeout import TimeoutMiddleware
+from fastapi_limiter import FastAPILimiter
+from fastapi_limiter.depends import RateLimiter
 
 from database import engine, Base, get_db # Import database engine, Base, and get_db
 from models import user as user_model # Import user model to create table
@@ -76,8 +81,32 @@ langfuse_handler = CallbackHandler(
 # Setup FastAPI
 from routers import general, ask, users, auth # Import the new auth router
 
-# Pass the lifespan context manager to the FastAPI app
-app = FastAPI(lifespan=lifespan)
+# Define middleware for request timeout of 10 seconds
+middleware = [
+    Middleware(TimeoutMiddleware, timeout=10.0)
+]
+
+# Remove old app instantiation and create FastAPI with global rate limit and timeout middleware
+app = FastAPI(
+    lifespan=lifespan,
+    middleware=middleware,
+    dependencies=[Depends(RateLimiter(times=10000, seconds=60))]
+)
+
+# Initialize Redis-based rate limiter on startup
+@app.on_event("startup")
+async def startup_limiter():
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    await FastAPILimiter.init(redis_url=redis_url)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*").split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include the routers
 app.include_router(auth.router) # Include the auth router
