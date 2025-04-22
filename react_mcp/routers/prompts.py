@@ -56,40 +56,59 @@ info_extraction_prompt = ChatPromptTemplate.from_messages([
 
 # Instructions
 - Analyze the user's message and identify any personal preferences, attributes, or statements.
-- Value must be a noun or adjective.
-- Relationship must be a verb.
-- Lifetime must be a duration or a date.
-- Do not confused with questions with preferences, attributes, or statements. Question might not include information about user. 
-- Key must be a category or superset noun/adjective (e.g., 'Color', 'Food', 'Hobby').
-
-
-## Sub-categories
-- Preferences (e.g., Likes, Dislikes)
-- Attributes (e.g., Color, Food, Hobby)
-- Statements (e.g., Is, Has, Prefers)
+- The 'value' must be a noun or adjective, and **always in singular form** (e.g., 'cat' not 'cats', 'bike' not 'bikes').
+- The 'relationship' must be a verb describing the user's connection, **always in singular form** (e.g., 'likes', 'dislikes', 'is', 'has').
+- The 'lifetime' must be a duration ('permanent', 'long', 'short') or an ISO 8601 datetime string.
+- The 'key' must be the **closest superordinate concept (immediate hypernym)** of the 'value'. It should be a noun representing the direct category the value belongs to. Avoid using relationship types or overly broad categories as the key.
+- Do not confuse questions with preferences, attributes, or statements. Questions might not include information about the user. 
 
 # Output Format
-- Always create output on English. 
-- Return a JSON with key "information" containing a list of objects following this schema:
+- Always create output in English.
+- Return a JSON object with a key "information" containing a list of objects following this schema:
 {format_instructions}
 
 # Examples
 Input: "I love pizza and hate broccoli."
 Output:
-- key: Food
-  value: Pizza
-  relationship: Likes
-  lifetime: permanent
-Input: "I have a cat."
+```json
+{{
+  "information": [
+    {{"key": "dish", "value": "pizza", "relationship": "likes", "lifetime": "permanent"}},
+    {{"key": "vegetable", "value": "broccoli", "relationship": "dislikes", "lifetime": "permanent"}}
+  ]
+}}
+```
+Input: "My favorite color is blue."
 Output:
-- key: Animal
-  value: Cat
-  relationship: Has
-  lifetime: permanent
-...
+```json
+{{
+  "information": [
+    {{"key": "color", "value": "blue", "relationship": "likes", "lifetime": "permanent"}}
+  ]
+}}
+```
+Input: "I have two cats."
+Output:
+```json
+{{
+  "information": [
+    {{"key": "feline", "value": "cat", "relationship": "has", "lifetime": "permanent"}}
+  ]
+}}
+```
+Input: "I think running is better than swimming."
+Output:
+```json
+{{
+  "information": [
+    {{"key": "exercise", "value": "running", "relationship": "prefers", "lifetime": "permanent"}},
+    {{"key": "exercise", "value": "swimming", "relationship": "prefers", "lifetime": "permanent"}}
+  ]
+}}
+```
 
 # Final Note
-If no personal information is found, return an empty list.
+If no personal information is found, return an empty list (`{{"information": []}}`).
         """,
     ),
     (

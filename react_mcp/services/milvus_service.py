@@ -143,7 +143,7 @@ def _sync_search_vectors(collection: Collection, search_vectors: List[List[float
 def _sync_get_vector_id_by_text(collection: Collection, text: str) -> Optional[int]:
     """Searches for a vector with the exact original_text and returns its Milvus ID."""
     # Normalize text
-    normalized_text = text.strip()
+    normalized_text = text.strip().lower()
     if not normalized_text:
         logger.warning("Attempted to search Milvus by empty/whitespace text.")
         return None
@@ -188,17 +188,14 @@ class MilvusService:
         self._collection: Collection | None = None
 
     def _get_collection_schema(self) -> CollectionSchema:
-        # Define fields: Primary Key, Embedding, Element Type, Original Text
+        # Define fields with original_text as primary key to enforce uniqueness
         fields = [
-            FieldSchema(name=MILVUS_ID_FIELD, dtype=DataType.INT64, is_primary=True, auto_id=True),
+            FieldSchema(name=MILVUS_TEXT_FIELD, dtype=DataType.VARCHAR, max_length=5000, is_primary=True, auto_id=False),
             FieldSchema(name=MILVUS_VECTOR_FIELD, dtype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIMENSION),
-            # FieldSchema(name=MILVUS_NEO4J_NODE_ID_FIELD, dtype=DataType.INT64), # Removed
-            # FieldSchema(name=MILVUS_NEO4J_REFS_FIELD, dtype=DataType.VARCHAR, max_length=65535), # Removed
-            FieldSchema(name=MILVUS_ELEMENT_TYPE_FIELD, dtype=DataType.VARCHAR, max_length=32), # 'Node', 'Relationship', 'CategoryNode'
-            FieldSchema(name=MILVUS_TEXT_FIELD, dtype=DataType.VARCHAR, max_length=5000) # Store original text, adjust length
+            FieldSchema(name=MILVUS_ELEMENT_TYPE_FIELD, dtype=DataType.VARCHAR, max_length=32) # 'Node', 'Relationship', 'CategoryNode'
         ]
         # Schema description updated
-        schema = CollectionSchema(fields, description="Knowledge Vectors: Text Embeddings Only") 
+        schema = CollectionSchema(fields, description="Knowledge Vectors: Text Embeddings Only")  
         return schema
 
     async def create_collection_if_not_exists(self):
@@ -220,14 +217,29 @@ class MilvusService:
                 # Schema check: Ensure only expected fields exist
                 schema_dict = self._collection.schema.to_dict()
                 schema_fields = {field['name']: field['type'] for field in schema_dict.get('fields', [])}
-                expected_fields = {MILVUS_ID_FIELD, MILVUS_VECTOR_FIELD, MILVUS_ELEMENT_TYPE_FIELD, MILVUS_TEXT_FIELD}
+                expected_fields = {MILVUS_TEXT_FIELD, MILVUS_VECTOR_FIELD, MILVUS_ELEMENT_TYPE_FIELD}
                 actual_field_names = set(schema_fields.keys())
 
                 if actual_field_names != expected_fields:
                     missing = expected_fields - actual_field_names
                     extra = actual_field_names - expected_fields
-                    logger.critical(f"CRITICAL: Existing Milvus collection '{MILVUS_COLLECTION_NAME}' schema mismatch! Expected fields: {expected_fields}. Found: {actual_field_names}. Missing: {missing or 'None'}. Extra: {extra or 'None'}. You MUST drop and recreate the collection.")
-                    # raise RuntimeError(f"Milvus schema mismatch for collection {MILVUS_COLLECTION_NAME}. Please drop and recreate.")
+                    logger.critical(f"Existing Milvus collection '{MILVUS_COLLECTION_NAME}' schema mismatch. Dropping and recreating to enforce uniqueness.")
+                    # Drop and recreate collection with updated schema
+                    try:
+                        await asyncio.to_thread(utility.drop_collection, MILVUS_COLLECTION_NAME, using=self._alias)
+                        logger.info(f"Dropped Milvus collection '{MILVUS_COLLECTION_NAME}'.")
+                    except Exception as drop_err:
+                        logger.error(f"Failed to drop mismatched Milvus collection '{MILVUS_COLLECTION_NAME}': {drop_err}", exc_info=True)
+                        raise
+                    # Recreate with correct schema and index
+                    schema = self._get_collection_schema()
+                    self._collection = await asyncio.to_thread(_sync_create_collection, self._alias, schema)
+                    await asyncio.to_thread(_sync_create_index, self._collection, MILVUS_VECTOR_FIELD)
+                    if utility.load_state(MILVUS_COLLECTION_NAME) != "loaded":
+                        self._collection.load()
+                        utility.wait_for_loading_complete(MILVUS_COLLECTION_NAME)
+                    logger.info(f"Recreated Milvus collection '{MILVUS_COLLECTION_NAME}' with updated schema and loaded.")
+                    return
                 else:
                     logger.info(f"Existing schema matches expectations (text embeddings only).")
 
@@ -312,11 +324,11 @@ class MilvusService:
         # Prepare data in the format Milvus expects (list of dicts matching schema fields)
         prepared_data = []
         for item in vectors_data:
-            # Only include fields defined in the simplified schema
-            data_entry = { 
+            # Only include fields defined in the simplified schema, ensure text is lowercase
+            data_entry = {
                 MILVUS_VECTOR_FIELD: item["embedding"],
                 MILVUS_ELEMENT_TYPE_FIELD: item["element_type"],
-                MILVUS_TEXT_FIELD: item["original_text"]
+                MILVUS_TEXT_FIELD: item["original_text"].lower()
             }
             prepared_data.append(data_entry)
 
@@ -358,7 +370,7 @@ class MilvusService:
             raise ConnectionError("Milvus collection not available")
         
         # Normalize text before passing to sync function
-        normalized_text = text.strip() if text else ""
+        normalized_text = text.strip().lower() if text else ""
         if not normalized_text:
             logger.warning("get_vector_id_by_text called with empty/whitespace text.")
             return None

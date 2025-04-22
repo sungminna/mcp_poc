@@ -92,6 +92,8 @@ def _sync_create_relationship_get_id(driver: Driver, query: str, params: Dict[st
 
 class Neo4jService:
     _driver: Driver | None = None
+    # Added asyncio Lock for Milvus check/insert logic
+    _milvus_insert_lock = asyncio.Lock()
 
     def connect(self):
         if self._driver is None:
@@ -223,247 +225,197 @@ class Neo4jService:
 
         # --- Pass 1: Check Milvus, generate embeddings for new texts, create Neo4j elements --- 
         logger.debug(f"Starting Pass 1 for user '{username}': Check Milvus, Embed new, Create Neo4j")
+        
+        # Collect all unique texts that might need checking/embedding first
+        texts_to_potentially_process = set()
+        valid_info_list = []
         for info in info_list:
-            key_str = info.get("key") # Get the original key string
+            key_str = info.get("key")
             value = info.get("value")
             relationship_verb = info.get("relationship")
-            lifetime = info.get("lifetime", "permanent")
-
             if not all([key_str, value, relationship_verb]):
                 logger.warning(f"Skipping incomplete item for user '{username}': {info}")
                 continue
+            valid_info_list.append(info) # Keep track of valid items
+            texts_to_potentially_process.add(value) # Node text
+            texts_to_potentially_process.add(relationship_verb) # Relationship text
+            texts_to_potentially_process.add(key_str) # Key/Category text
 
-            node_text = value # Use only the value for node embedding text
-            rel_text = relationship_verb
-
-            # --- Handle Node Text (Value) ---
-            node_milvus_id = milvus_id_cache.get(node_text)
-            if node_milvus_id is None: # Not cached yet
-                try:
-                    node_milvus_id = await milvus_service.get_vector_id_by_text(node_text)
-                    if node_milvus_id is not None:
-                        milvus_id_cache[node_text] = node_milvus_id # Cache existing ID
-                        logger.info(f"[SAVE_INFO] Found existing Milvus ID {node_milvus_id} for NODE text: '{node_text}'")
-                    else:
-                        logger.info(f"[SAVE_INFO] No existing Milvus vector for NODE text '{node_text}'. Will generate/insert.")
-                        # Text not in Milvus, generate embedding if not cached
-                        if node_text not in embedding_cache:
-                            node_embedding = await self.generate_embedding(node_text)
-                            if not any(node_embedding):
-                                logger.error(f"Failed to generate embedding for node '{node_text}'. Skipping item.")
-                                continue
-                            embedding_cache[node_text] = node_embedding
-                        # else: embedding already cached
-                except Exception as e:
-                    logger.error(f"Error checking/embedding node text '{node_text}': {e}. Skipping item.")
-                    continue
+        # Determine which texts actually need embedding (check Milvus within lock)
+        embeddings_needed = {} # {text: type}
+        async with self._milvus_insert_lock: # Acquire lock
+            logger.debug(f"Acquired lock to check Milvus for {len(texts_to_potentially_process)} potential texts.")
+            # Check local cache first (in case texts repeat within the batch)
+            texts_to_check_in_milvus = {t for t in texts_to_potentially_process if t not in milvus_id_cache}
             
-            # --- Handle Relationship Text ---
-            rel_milvus_id = milvus_id_cache.get(rel_text)
-            if rel_milvus_id is None: # Not cached yet
-                try:
-                    rel_milvus_id = await milvus_service.get_vector_id_by_text(rel_text)
-                    if rel_milvus_id is not None:
-                        milvus_id_cache[rel_text] = rel_milvus_id # Cache existing ID
-                        logger.info(f"[SAVE_INFO] Found existing Milvus ID {rel_milvus_id} for REL text: '{rel_text}'")
-                    else:
-                        logger.info(f"[SAVE_INFO] No existing Milvus vector for REL text '{rel_text}'. Will generate/insert.")
-                        # Text not in Milvus, generate embedding if not cached
-                        if rel_text not in embedding_cache:
-                            rel_embedding = await self.generate_embedding(rel_text)
-                            if not any(rel_embedding):
-                                logger.error(f"Failed to generate embedding for rel '{rel_text}'. Skipping item.")
-                                continue
-                            embedding_cache[rel_text] = rel_embedding
-                        # else: embedding already cached
-                except Exception as e:
-                    logger.error(f"Error checking/embedding rel text '{rel_text}': {e}. Skipping item.")
-                    continue
-
-            # --- Handle Key Text (for Hierarchy/Category Node) ---
-            key_milvus_id = milvus_id_cache.get(key_str)
-            key_node_neo4j_id_needed_for_milvus = False # Flag to add key embedding later
-            if key_milvus_id is None: # Key text not cached yet
-                try:
-                    key_milvus_id = await milvus_service.get_vector_id_by_text(key_str)
-                    if key_milvus_id is not None:
-                        milvus_id_cache[key_str] = key_milvus_id # Cache existing ID
-                        logger.info(f"[SAVE_INFO] Found existing Milvus ID {key_milvus_id} for KEY text: '{key_str}'")
-                    else:
-                        logger.info(f"[SAVE_INFO] No existing Milvus vector for KEY text '{key_str}'. Will generate/insert if Neo4j node created.")
-                        # Key text not in Milvus, generate embedding if not cached
-                        if key_str not in embedding_cache:
-                            key_embedding = await self.generate_embedding(key_str)
-                            if not any(key_embedding):
-                                logger.warning(f"Failed to generate embedding for key '{key_str}'. Will not add to Milvus.")
-                            else:
-                                embedding_cache[key_str] = key_embedding
-                                key_node_neo4j_id_needed_for_milvus = True # Mark for Milvus insert later
-                        elif key_str in embedding_cache: # Already cached (e.g. duplicate key in batch)
-                             key_node_neo4j_id_needed_for_milvus = True # Mark for Milvus insert later
-                        # else: embedding failed, do nothing for Milvus
-
-                except Exception as e:
-                    logger.error(f"Error checking/embedding key text '{key_str}': {e}. Skipping Milvus add for key.")
-            
-            # --- Create/Merge Neo4j Node and Relationships (Get IDs) --- 
-            try:
-                # --- Step 2a: Create/Merge Main Information Node and Get ID --- 
-                create_node_query = (
-                    "MERGE (i:Information {key: $key, value: $value}) " # Use original key parameter
-                    "ON CREATE SET i.createdAt = timestamp(), i.children = [] " # Initialize children on create
-                    "ON MATCH SET i.updatedAt = timestamp() " # Update timestamp on match too
-                    "RETURN id(i)" # Use internal id()
-                )
-                node_params = {"key": key_str, "value": value} # Pass the original string key
-                neo4j_node_id = await asyncio.to_thread(_sync_create_node_get_id, driver, create_node_query, node_params)
-                if neo4j_node_id is None:
-                    logger.error(f"Failed to create/get Neo4j node ID for '{value}' (key: '{key_str}'). Skipping item.")
-                    continue
-                processed_neo4j_ids[('node', node_text)] = neo4j_node_id
+            if texts_to_check_in_milvus:
+                # Batch check would be ideal, doing sequential for now
+                check_tasks = {text: milvus_service.get_vector_id_by_text(text) for text in texts_to_check_in_milvus}
+                results = await asyncio.gather(*check_tasks.values(), return_exceptions=True)
                 
-                # --- Step 2b: Create/Merge User Relationship --- 
+                for i, text in enumerate(check_tasks.keys()):
+                    result = results[i]
+                    if isinstance(result, Exception):
+                        logger.error(f"Error checking Milvus for text '{text}': {result}")
+                        # Decide how to handle - skip text? Assume not present?
+                        # Assuming not present for now to allow potential insertion
+                        embeddings_needed[text] = None # Mark as needing embedding, type resolved later
+                    elif result is not None:
+                        milvus_id_cache[text] = result # Cache existing ID
+                        logger.debug(f"Milvus check found existing ID for text: '{text}'")
+                    else:
+                        # Text is new according to Milvus
+                        embeddings_needed[text] = None # Mark as needing embedding, type resolved later
+                        logger.debug(f"Milvus check found no vector for text: '{text}'")
+            logger.debug(f"Releasing lock. {len(embeddings_needed)} texts marked for potential embedding.")
+
+        # --- Generate Embeddings (Outside Lock) --- 
+        if embeddings_needed:
+            embedding_tasks = {}
+            for text in embeddings_needed.keys():
+                if text not in embedding_cache: # Avoid re-generating
+                    embedding_tasks[text] = self.generate_embedding(text)
+            
+            if embedding_tasks:
+                logger.debug(f"Generating embeddings for {len(embedding_tasks)} texts.")
+                embedding_results = await asyncio.gather(*embedding_tasks.values(), return_exceptions=True)
+                for i, text in enumerate(embedding_tasks.keys()):
+                    result = embedding_results[i]
+                    if isinstance(result, Exception) or not any(result):
+                        logger.error(f"Failed to generate embedding for text '{text}': {result}. Will not add to Milvus.")
+                        # Remove from embeddings_needed if failed?
+                        if text in embeddings_needed:
+                             del embeddings_needed[text] 
+                    else:
+                        embedding_cache[text] = result
+                        logger.debug(f"Successfully generated embedding for text: '{text}'")
+            else:
+                logger.debug("No new embeddings needed (all texts needing embedding were already cached).")
+        else:
+            logger.debug("No texts needed embedding generation.")
+
+        # --- Process each valid info item: Create Neo4j & Prepare Milvus Insert Data --- 
+        for info in valid_info_list:
+            key_str = info.get("key")
+            value = info.get("value")
+            relationship_verb = info.get("relationship")
+            lifetime = info.get("lifetime", "permanent")
+            node_text = value
+            rel_text = relationship_verb
+            
+            # --- Create/Merge Neo4j Elements --- 
+            neo4j_node_id = None
+            neo4j_rel_id = None
+            neo4j_key_node_id = None
+            try:
+                # Step 2a: Node
+                create_node_query = (
+                    "MERGE (i:Information {key: $key, value: $value}) "
+                    "ON CREATE SET i.createdAt = timestamp(), i.children = [] "
+                    "ON MATCH SET i.updatedAt = timestamp() "
+                    "RETURN id(i)"
+                )
+                node_params = {"key": key_str, "value": value}
+                neo4j_node_id = await asyncio.to_thread(_sync_create_node_get_id, driver, create_node_query, node_params)
+                if neo4j_node_id is None: raise ValueError(f"Failed to create/get node ID for {value}")
+
+                # Step 2b: Relationship
                 create_rel_query = (
                     "MATCH (u:User {username: $username}) "
-                    "MATCH (i:Information) WHERE id(i) = $node_id " # Match main node by ID
+                    "MATCH (i:Information) WHERE id(i) = $node_id " 
                     "MERGE (u)-[r:RELATES_TO {value: $relationship_verb}]->(i) "
                     "ON CREATE SET r.lifetime = $lifetime, r.createdAt = timestamp() "
-                    "ON MATCH SET r.lifetime = $lifetime, r.updatedAt = timestamp() " # Update timestamp on match too
-                    "RETURN id(r)" # Use internal id()
+                    "ON MATCH SET r.lifetime = $lifetime, r.updatedAt = timestamp() " 
+                    "RETURN id(r)"
                 )
-                rel_params = {
-                    "username": username,
-                    "node_id": neo4j_node_id, # Use ID instead of key/value match
-                    "relationship_verb": relationship_verb,
-                    "lifetime": lifetime
-                }
+                rel_params = {"username": username, "node_id": neo4j_node_id, "relationship_verb": relationship_verb, "lifetime": lifetime}
                 neo4j_rel_id = await asyncio.to_thread(_sync_create_relationship_get_id, driver, create_rel_query, rel_params)
-                if neo4j_rel_id is None:
-                     logger.error(f"Failed to create/get Neo4j user relationship ID for '{rel_text}' -> '{node_text}'. Skipping relationship part.")
-                     # Continue processing node and hierarchy if needed
-                else:
-                     processed_neo4j_ids[('rel', rel_text)] = neo4j_rel_id
+                if neo4j_rel_id is None: logger.error(f"Failed to create/get relationship ID for {rel_text} -> {node_text}") # Log error but continue
 
-                # --- Step 2c: Create/Merge Key Node (Category) and Hierarchy Link ---
-                key_node_key_prop = "Category" # Define the 'key' property for the category node itself
+                # Step 2c: Key Node & Hierarchy
+                key_node_key_prop = "Category"
                 create_key_node_query = (
                     "MERGE (k:Information {key: $key_node_key, value: $key_value}) "
-                    "ON CREATE SET k.createdAt = timestamp(), k.children = [] " # Initialize children here too
-                    "ON MATCH SET k.updatedAt = timestamp() " # Update timestamp on match too
+                    "ON CREATE SET k.createdAt = timestamp(), k.children = [] "
+                    "ON MATCH SET k.updatedAt = timestamp() "
                     "RETURN id(k)"
                 )
                 key_node_params = {"key_node_key": key_node_key_prop, "key_value": key_str}
                 neo4j_key_node_id = await asyncio.to_thread(_sync_create_node_get_id, driver, create_key_node_query, key_node_params)
-
-                if neo4j_key_node_id is None:
-                    logger.error(f"Failed to create/get Neo4j key node ID for category '{key_str}'. Skipping hierarchy link and Milvus key add.")
-                else:
-                    processed_neo4j_ids[('key_node', key_str)] = neo4j_key_node_id # Track for Milvus update if needed
-
-                    # Create hierarchy link
-                    create_hierarchy_rel_query = (
-                        "MATCH (i:Information) WHERE id(i) = $node_id "
-                        "MATCH (k:Information) WHERE id(k) = $key_node_id "
-                        "MERGE (i)-[h:HAS_CATEGORY]->(k) "
-                        "ON CREATE SET h.createdAt = timestamp() "
-                        "ON MATCH SET h.updatedAt = timestamp()"
-                    )
-                    hierarchy_rel_params = {"node_id": neo4j_node_id, "key_node_id": neo4j_key_node_id}
-                    await asyncio.to_thread(_sync_run_write_query, driver, create_hierarchy_rel_query, hierarchy_rel_params)
-                    logger.debug(f"Ensured HAS_CATEGORY link between node {neo4j_node_id} ('{value}') and key node {neo4j_key_node_id} ('{key_str}')")
-
-                    # --- Prepare Milvus Insertion Data (Add key node if needed) ---
-                    if key_node_neo4j_id_needed_for_milvus and key_str in embedding_cache:
-                        milvus_insertion_data.append({
-                            "embedding": embedding_cache[key_str],
-                            # No longer adding neo4j_id
-                            "element_type": "Node", # Changed type from CategoryNode to Node
-                            "original_text": key_str,
-                            "text_key": key_str # Keep for mapping insert results if needed, though maybe less critical now
-                        })
-                        key_node_neo4j_id_needed_for_milvus = False # Reset flag
-
-                # --- Prepare Milvus Insertion Data (Add main node and relationship if new) ---
-                if node_milvus_id is None and node_text in embedding_cache: # Needs insertion
-                    milvus_insertion_data.append({
-                        "embedding": embedding_cache[node_text],
-                         # No longer adding neo4j_id
-                        "element_type": "Node",
-                        "original_text": node_text,
-                        "text_key": node_text # Add key to map result IDs back
-                    })
-
-                if rel_milvus_id is None and neo4j_rel_id is not None and rel_text in embedding_cache: # Needs insertion (and rel was created)
-                     # Create JSON string for relationship references - REMOVED
-                     # refs_payload = json.dumps([{"user": username, "rel_id": neo4j_rel_id}])
-                     milvus_insertion_data.append({
-                        "embedding": embedding_cache[rel_text],
-                         # No longer adding neo4j_refs
-                        "element_type": "Relationship", # Storing the verb itself
-                        "original_text": rel_text,
-                        "text_key": rel_text # Add key to map result IDs back
-                    })
-
-            except Exception as e:
-                logger.error(f"Error during Neo4j element creation/linking for info key='{key_str}', value='{value}': {e}. Skipping item.", exc_info=True)
-                continue
-        
-        logger.debug(f"Pass 1 Complete. Found {len(milvus_id_cache)} existing vectors. Prepared {len(milvus_insertion_data)} new vectors for insertion.")
-
-        # --- Pass 2: Batch Insert New Vectors into Milvus --- 
-        newly_inserted_milvus_ids = {}
-        if milvus_insertion_data:
-            logger.debug(f"Starting Pass 2: Inserting {len(milvus_insertion_data)} new vectors into Milvus.")
-            try:
-                # Prepare payload without Neo4j IDs/Refs, only core fields
-                insert_payload = [
-                    { 
-                        "embedding": item["embedding"], 
-                        "element_type": item["element_type"],
-                        "original_text": item["original_text"]
-                    }
-                     for item in milvus_insertion_data
-                ]
-                inserted_ids = await milvus_service.insert_vectors(insert_payload)
+                if neo4j_key_node_id is None: raise ValueError(f"Failed to create/get key node ID for {key_str}")
                 
-                # Mapping back IDs might be less useful now, but kept for potential debugging
-                if inserted_ids and len(inserted_ids) == len(milvus_insertion_data):
-                    logger.info(f"Successfully inserted {len(inserted_ids)} new vectors into Milvus.")
-                    for i, item in enumerate(milvus_insertion_data):
-                        text_key = item['text_key']
-                        newly_inserted_milvus_ids[text_key] = inserted_ids[i]
-                        milvus_id_cache[text_key] = inserted_ids[i] 
-                else:
-                     logger.error(f"Milvus insertion failed or returned incorrect ID count. Expected {len(milvus_insertion_data)}, got {len(inserted_ids) if inserted_ids else 0}.")
-            except Exception as e:
-                logger.error(f"Failed during Milvus batch insertion: {e}", exc_info=True)
-        else:
-            logger.debug("Pass 2 Skipped: No new vectors to insert.")
+                create_hierarchy_rel_query = (
+                    "MATCH (i:Information) WHERE id(i) = $node_id "
+                    "MATCH (k:Information) WHERE id(k) = $key_node_id "
+                    "MERGE (i)-[h:HAS_CATEGORY]->(k) "
+                    "ON CREATE SET h.createdAt = timestamp() "
+                    "ON MATCH SET h.updatedAt = timestamp()"
+                )
+                hierarchy_rel_params = {"node_id": neo4j_node_id, "key_node_id": neo4j_key_node_id}
+                await asyncio.to_thread(_sync_run_write_query, driver, create_hierarchy_rel_query, hierarchy_rel_params)
 
-        # --- Pass 3: Update Neo4j elements with respective Milvus IDs --- REMOVED
-        logger.debug("Pass 3 Skipped: No longer updating Neo4j elements with Milvus IDs.")
-        # update_tasks = []
-        # # Iterate through the successfully processed Neo4j elements
-        # for (elem_type, text_key), neo4j_id in processed_neo4j_ids.items():
-        #     final_milvus_id = milvus_id_cache.get(text_key) # Get ID from cache (existing or new)
-        #     if final_milvus_id is not None:
-        #         update_tasks.append(asyncio.to_thread(_sync_set_milvus_id, driver, neo4j_id, final_milvus_id))
-        #     else:
-        #          # This case should ideally not happen if logic above is correct, but log if it does
-        #          logger.warning(f"Could not find a Milvus ID (existing or new) for {elem_type} text '{text_key}' (Neo4j ID: {neo4j_id}). Skipping update.")
-        
-        # if update_tasks:
-        #     try:
-        #         update_results = await asyncio.gather(*update_tasks, return_exceptions=True)
-        #         failed_updates = [res for res in update_results if isinstance(res, Exception)]
-        #         if failed_updates:
-        #             logger.error(f"{len(failed_updates)} errors occurred while setting Milvus IDs in Neo4j. Example: {failed_updates[0]}")
-        #         else:
-        #             logger.info(f"Successfully initiated updates for {len(update_tasks)} Neo4j elements with Milvus IDs.")
-        #     except Exception as e:
-        #          logger.error(f"Unexpected error during batch updating Neo4j with Milvus IDs: {e}", exc_info=True)
-        # else:
-        #      logger.debug("Pass 3 Skipped: No Neo4j elements to update.")
+            except Exception as e:
+                logger.error(f"Error during Neo4j element creation/linking for info key='{key_str}', value='{value}': {e}. Skipping Milvus prep for this item.", exc_info=True)
+                continue # Skip Milvus prep for this item if Neo4j failed
+
+            # --- Prepare Milvus Insertion Data (Add if new & embedding succeeded) ---
+            if node_text in embeddings_needed and node_text in embedding_cache:
+                 milvus_insertion_data.append({
+                     "embedding": embedding_cache[node_text],
+                     "element_type": "Node",
+                     "original_text": node_text.lower()
+                 })
+                 del embeddings_needed[node_text] # Mark as processed for insertion
+                 
+            if rel_text in embeddings_needed and rel_text in embedding_cache and neo4j_rel_id is not None: # Check rel was created
+                 milvus_insertion_data.append({
+                     "embedding": embedding_cache[rel_text],
+                     "element_type": "Relationship",
+                     "original_text": rel_text.lower()
+                 })
+                 del embeddings_needed[rel_text] # Mark as processed
+                 
+            if key_str in embeddings_needed and key_str in embedding_cache:
+                 milvus_insertion_data.append({
+                     "embedding": embedding_cache[key_str],
+                     "element_type": "Node", 
+                     "original_text": key_str.lower()
+                 })
+                 del embeddings_needed[key_str] # Mark as processed
+
+        # --- Pass 2: Batch Insert New Vectors into Milvus, filtering out duplicates ---
+        if milvus_insertion_data:
+            # Deduplicate insertion data by original_text
+            deduped_items = {item["original_text"].lower(): item for item in milvus_insertion_data}.values()
+            logger.debug(f"Attempting to insert {len(deduped_items)} unique new vectors into Milvus.")
+            # Filter out items that already exist in Milvus by exact text match
+            filtered_items = []
+            for item in deduped_items:
+                text = item["original_text"].lower()
+                item["original_text"] = text
+                try:
+                    existing_id = await milvus_service.get_vector_id_by_text(text)
+                    if existing_id is not None:
+                        logger.debug(f"Skipping insertion for '{text}' because it already exists in Milvus.")
+                        continue
+                except Exception as e:
+                    logger.error(f"Error checking Milvus for existing text '{text}': {e}", exc_info=True)
+                filtered_items.append(item)
+            if filtered_items:
+                logger.debug(f"{len(filtered_items)} vectors remain after filtering existing duplicates.")
+                try:
+                    inserted_ids = await milvus_service.insert_vectors(filtered_items)
+                    # Logging success/failure based on count
+                    if inserted_ids and len(inserted_ids) == len(filtered_items):
+                        logger.info(f"Successfully inserted {len(inserted_ids)} new vectors into Milvus.")
+                    else:
+                        logger.error(f"Milvus insertion failed or returned incorrect ID count. Expected {len(filtered_items)}, got {len(inserted_ids) if inserted_ids else 0}.")
+                except Exception as e:
+                    logger.error(f"Failed during Milvus batch insertion: {e}", exc_info=True)
+            else:
+                logger.debug("No new vectors to insert after filtering existing duplicates.")
+        else:
+            logger.debug("Pass 2 Skipped: No new vectors needed insertion.")
 
         logger.info(f"Finished saving personal information for user '{username}'.")
         return True # Indicate overall process completion
@@ -599,8 +551,8 @@ class Neo4jService:
                 break
 
             rel_verb = record_dict.get('relationship', '').lower()
-            node_val = record_dict.get('node_value', '')
-            node_key = record_dict.get('node_key', '')
+            node_val = record_dict.get('node_value', '').lower()
+            node_key = record_dict.get('node_key', '').lower()
             info_tuple = (rel_verb, node_val, node_key)
 
             if not all([rel_verb, node_val]) or info_tuple in seen_tuples:
