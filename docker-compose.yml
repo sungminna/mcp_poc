@@ -72,7 +72,7 @@ services:
   # Milvus Standalone Service
   milvus-standalone:
     container_name: milvus-standalone
-    image: milvusdb/milvus:v2.4.9 # Using a slightly older version for potential compatibility, adjust if needed
+    image: milvusdb/milvus # Using a slightly older version for potential compatibility, adjust if needed
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined # Required by Milvus
@@ -96,6 +96,20 @@ services:
       start_period: 90s # Give Milvus time to start
       timeout: 20s
       retries: 3
+    networks:
+      - app-network
+
+  # Milvus Web UI (Attu)
+  attu:
+    container_name: milvus-attu
+    image: bitnami/attu:latest # Use Attu version compatible with Milvus v2.5.x
+    ports:
+      - "8000:3000" # Map host port 8000 to container port 3000 (Attu default)
+    environment:
+      MILVUS_URL: milvus-standalone:19530 # Point Attu to the Milvus service
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy # Wait for Milvus to be healthy
     networks:
       - app-network
 

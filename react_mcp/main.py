@@ -6,6 +6,7 @@ import logging # Import logging
 from database import engine, Base, get_db # Import database engine, Base, and get_db
 from models import user as user_model # Import user model to create table
 from services.neo4j_service import neo4j_service # Import the Neo4j service instance
+from services.milvus_service import milvus_service # Import the Milvus service instance
 
 from langfuse.callback import CallbackHandler
 import os
@@ -30,23 +31,29 @@ async def lifespan(app: FastAPI):
         # Create database tables asynchronously
         await create_db_tables()
 
-        # Connect to Neo4j
-        neo4j_service.connect() # Assuming this is synchronous or handled internally
-        logger.info("Neo4j service connected.")
-        # Attempt to create indexes after connection
-        logger.info("Attempting to create Neo4j indexes...")
-        await neo4j_service.create_indexes() # Assuming this is async
-        logger.info("Neo4j index creation attempt finished.")
+        # Connect to Neo4j and create constraints/indexes
+        neo4j_service.connect()
+        logger.info("Neo4j service connection verified.")
+        logger.info("Attempting to create Neo4j constraints...")
+        await neo4j_service.create_indexes() # Now only creates constraints
+        logger.info("Neo4j constraint creation attempt finished.")
+
+        # Connect to Milvus and ensure collection/index exists
+        await milvus_service.connect()
+        logger.info("Milvus service connected and collection/index checked.")
+
     except Exception as e:
         # Log connection or index creation errors
         logger.error(f"Failed during startup initialization: {e}", exc_info=True)
         # Depending on requirements, you might want to prevent startup if DB init fails
-        # raise HTTPException(status_code=500, detail="Initialization failed")
+        # raise # Re-raise to potentially stop the app
     yield
     # Shutdown
     logger.info("Application shutdown...")
-    neo4j_service.close() # Assuming this is synchronous or handled internally
+    neo4j_service.close()
     logger.info("Neo4j service connection closed.")
+    milvus_service.close()
+    logger.info("Milvus service connection closed.")
 
 
 # Create database tables moved to lifespan

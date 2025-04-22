@@ -80,6 +80,12 @@ Output:
   value: Pizza
   relationship: Likes
   lifetime: permanent
+Input: "I have a cat."
+Output:
+- key: Animal
+  value: Cat
+  relationship: Has
+  lifetime: permanent
 ...
 
 # Final Note
