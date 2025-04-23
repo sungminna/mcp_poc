@@ -3,8 +3,6 @@ from dotenv import load_dotenv
 from contextlib import asynccontextmanager # Import asynccontextmanager
 import logging # Import logging
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware import Middleware
-from starlette.middleware.timeout import TimeoutMiddleware
 from fastapi_limiter import FastAPILimiter
 from fastapi_limiter.depends import RateLimiter
 
@@ -81,15 +79,10 @@ langfuse_handler = CallbackHandler(
 # Setup FastAPI
 from routers import general, ask, users, auth # Import the new auth router
 
-# Define middleware for request timeout of 10 seconds
-middleware = [
-    Middleware(TimeoutMiddleware, timeout=10.0)
-]
 
 # Remove old app instantiation and create FastAPI with global rate limit and timeout middleware
 app = FastAPI(
     lifespan=lifespan,
-    middleware=middleware,
     dependencies=[Depends(RateLimiter(times=10000, seconds=60))]
 )
 
