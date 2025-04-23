@@ -537,15 +537,53 @@ class Neo4jService:
             except Exception as e:
                 logger.error(f"Error in Neo4j Query 2 (children) for user '{username}': {e}", exc_info=True)
 
-        # 5. Combine, Deduplicate, and Format Results
+        # 5. Neo4j Query 3: Find edges that contain similar information
+        edge_neo4j_data = []
+        try:
+            # Query to find edges that have properties similar to the keywords or relevant texts
+            query3 = """
+            MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
+            WHERE any(text IN $texts WHERE r.value CONTAINS text) 
+               OR any(text IN $texts WHERE toLower(r.value) CONTAINS toLower(text))
+            RETURN 
+                elementId(r) AS rel_id, 
+                r.value AS relationship, 
+                i.key AS node_key, 
+                i.value AS node_value, 
+                i.createdAt AS created_at, 
+                r.lifetime AS lifetime
+            ORDER BY i.createdAt DESC
+            LIMIT $limit
+            """
+            query3_results = await _async_fetch_list(driver, query3,
+                params={
+                    "username": username, 
+                    "texts": relevant_texts + keywords,  # Search in both relevant texts and original keywords
+                    "limit": top_k * 3
+                }
+            )
+            if query3_results:
+                edge_neo4j_data.extend(query3_results)
+                logger.info(f"Query 3 found {len(edge_neo4j_data)} edges/relationships with similar information.")
+            else:
+                logger.info(f"Query 3 found no edges with similar information for user '{username}'.")
+        except Exception as e:
+            logger.error(f"Error in Neo4j Query 3 (edges) for user '{username}': {e}", exc_info=True)
+
+        # 6. Combine, Deduplicate, and Format Results
         final_results_map = {}
         # Process initial results first
         for record in initial_neo4j_data:
             rel_id = record["rel_id"]
             if rel_id not in final_results_map: # Use relationship ID as unique key for now
                 final_results_map[rel_id] = dict(record)
-        # Add results from child keyword search, potentially overwriting if rel_id collided (unlikely but possible)
+        # Add results from child keyword search
         for record in child_neo4j_data:
+             rel_id = record["rel_id"]
+             if rel_id not in final_results_map:
+                 final_results_map[rel_id] = dict(record)
+        # Add results from edge similarity search
+        for record in edge_neo4j_data:
              rel_id = record["rel_id"]
              if rel_id not in final_results_map:
                  final_results_map[rel_id] = dict(record)
@@ -584,7 +622,7 @@ class Neo4jService:
             sentence = sentence[0].upper() + sentence[1:]
             output_sentences.append(sentence)
 
-        logger.info(f"Formatted {len(output_sentences)} unique context sentences after children expansion for user '{username}'.")
+        logger.info(f"Formatted {len(output_sentences)} unique context sentences after keywords, children, and edge expansion for user '{username}'.")
         return output_sentences
 
 # Global instance
