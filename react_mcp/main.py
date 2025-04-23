@@ -3,8 +3,6 @@ from dotenv import load_dotenv
 from contextlib import asynccontextmanager # Import asynccontextmanager
 import logging # Import logging
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_limiter import FastAPILimiter
-from fastapi_limiter.depends import RateLimiter
 
 from database import engine, Base, get_db # Import database engine, Base, and get_db
 from models import user as user_model # Import user model to create table
@@ -31,6 +29,8 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Application startup...")
     try:
+        # Removed Redis rate limiter initialization
+        
         # Create database tables asynchronously
         await create_db_tables()
 
@@ -80,17 +80,12 @@ langfuse_handler = CallbackHandler(
 from routers import general, ask, users, auth # Import the new auth router
 
 
-# Remove old app instantiation and create FastAPI with global rate limit and timeout middleware
+# Remove old app instantiation and create FastAPI
 app = FastAPI(
     lifespan=lifespan,
-    dependencies=[Depends(RateLimiter(times=10000, seconds=60))]
 )
 
-# Initialize Redis-based rate limiter on startup
-@app.on_event("startup")
-async def startup_limiter():
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    await FastAPILimiter.init(redis_url=redis_url)
+# Removed Redis rate limiter startup event
 
 # Add CORS middleware
 app.add_middleware(

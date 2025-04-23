@@ -4,7 +4,6 @@ import asyncio
 import logging
 from datetime import datetime
 from collections import deque
-from fastapi_limiter.depends import RateLimiter  # Added per-token rate limiter dependency
 
 from services.llm_service import llm_ask # The main REACT agent call
 from services.neo4j_service import neo4j_service
@@ -59,7 +58,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[int] = Field(None, description="ID of the chat session; if omitted, a new session will be created.")
     user_message: str
 
-@router.post("/api/chat/", dependencies=[Depends(RateLimiter(times=20, seconds=60))])
+@router.post("/api/chat/")
 async def ask(request: ChatRequest, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
     user_message = request.user_message
     username = current_user.username # Get username from authenticated user
