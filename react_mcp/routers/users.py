@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Request
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio # Import asyncio
@@ -9,13 +9,15 @@ from crud import user as crud_user
 from database import get_db
 from core.security import get_current_active_user
 from services.neo4j_service import neo4j_service # Import Neo4j service
+from main import limiter, DEFAULT_REGISTER_LIMIT  # Import the limiter and rate limit
 
 router = APIRouter()
 logger = logging.getLogger(__name__) # Setup logger
 
 # User creation endpoint (public)
 @router.post("/api/users/", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["users"])
-async def create_user_endpoint(user: UserCreate, db: AsyncSession = Depends(get_db)):
+@limiter.limit(DEFAULT_REGISTER_LIMIT)  # Use configurable registration rate limit
+async def create_user_endpoint(request: Request, user: UserCreate, db: AsyncSession = Depends(get_db)):
     db_user_by_username = await crud_user.get_user_by_username(db, username=user.username)
     if db_user_by_username:
         raise HTTPException(status_code=400, detail="Username already registered")

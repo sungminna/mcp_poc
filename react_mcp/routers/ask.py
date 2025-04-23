@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 import asyncio
 import logging
@@ -12,7 +12,7 @@ from core.security import get_current_active_user # Function to get authenticate
 from database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from crud.chat import create_session, get_session, create_chat_message, get_sessions, get_messages, delete_session
-from main import langfuse_handler  # Import Langfuse callback handler
+from main import langfuse_handler, limiter, DEFAULT_CHAT_LIMIT, get_user_id_from_token  # Import Langfuse callback handler, limiter, and token-based key func
 
 # TODO: Import or define the LLM model instance used for extraction/keyword generation
 # from services.llm_service import model as extraction_model # Example if using the same model
@@ -59,15 +59,16 @@ class ChatRequest(BaseModel):
     user_message: str
 
 @router.post("/api/chat/")
-async def ask(request: ChatRequest, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
-    user_message = request.user_message
+@limiter.limit(DEFAULT_CHAT_LIMIT, key_func=get_user_id_from_token)  # Use the configurable rate limit with token-based key func
+async def ask(request: Request, request_data: ChatRequest, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
+    user_message = request_data.user_message
     username = current_user.username # Get username from authenticated user
 
     logger.info(f"Processing chat request for user: {username}")
 
     # Handle chat session creation or retrieval
-    if request.session_id:
-        session = await get_session(db, request.session_id)
+    if request_data.session_id:
+        session = await get_session(db, request_data.session_id)
         if not session or session.user_id != current_user.id:
             raise HTTPException(status_code=404, detail="Chat session not found")
     else:
@@ -76,7 +77,7 @@ async def ask(request: ChatRequest, current_user: User = Depends(get_current_act
 
     # Initialize or load rolling context window
     if session_id not in session_contexts:
-        if request.session_id:
+        if request_data.session_id:
             past_messages = await get_messages(db, session_id)
             session_contexts[session_id] = deque(
                 [(msg.sender, msg.content) for msg in past_messages[-MAX_CONTEXT_MESSAGES:]],
@@ -216,7 +217,7 @@ class MessageResponse(BaseModel):
         orm_mode = True
 
 @router.get("/api/chat/sessions", response_model=List[SessionResponse], tags=["chat"])
-async def list_sessions(current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
+async def list_sessions(request: Request, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
     """List all chat sessions for the current user with first question and answer preview"""
     db_sessions = await get_sessions(db, current_user.id)
     sessions = []
@@ -229,7 +230,7 @@ async def list_sessions(current_user: User = Depends(get_current_active_user), d
     return sessions
 
 @router.get("/api/chat/{session_id}/messages", response_model=List[MessageResponse], tags=["chat"])
-async def list_messages(session_id: int, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
+async def list_messages(request: Request, session_id: int, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
     """Retrieve all messages for a given chat session"""
     session = await get_session(db, session_id)
     if not session or session.user_id != current_user.id:
@@ -238,7 +239,7 @@ async def list_messages(session_id: int, current_user: User = Depends(get_curren
     return messages
 
 @router.delete("/api/chat/{session_id}", status_code=204, tags=["chat"])
-async def remove_session(session_id: int, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
+async def remove_session(request: Request, session_id: int, current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db)):
     """Delete a chat session and its messages"""
     session = await get_session(db, session_id)
     if not session or session.user_id != current_user.id:
