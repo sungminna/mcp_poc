@@ -3,6 +3,10 @@ from dotenv import load_dotenv
 from contextlib import asynccontextmanager # Import asynccontextmanager
 import logging # Import logging
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+import jwt
 
 from database import engine, Base, get_db # Import database engine, Base, and get_db
 from models import user as user_model # Import user model to create table
@@ -17,6 +21,45 @@ import models.chat  # Register chat models so their tables are created
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+load_dotenv()  # Load environment variables first
+
+# --- Rate limiting setup with configurable limits ---
+DEFAULT_CHAT_LIMIT = os.getenv("RATE_LIMIT_CHAT", "30/minute")
+DEFAULT_LOGIN_LIMIT = os.getenv("RATE_LIMIT_LOGIN", "10/minute")
+DEFAULT_REGISTER_LIMIT = os.getenv("RATE_LIMIT_REGISTER", "5/hour")
+
+# Secret key for JWT
+SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key_needs_to_be_changed")
+
+# Custom key function for chat endpoint based on user token
+def get_user_id_from_token(request: Request):
+    try:
+        # Extract token from Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            # Fall back to IP if no valid auth header
+            return get_remote_address(request)
+            
+        token = auth_header.replace("Bearer ", "")
+        
+        # Decode JWT token to get user ID
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        user_id = payload.get("sub")  # 'sub' typically contains the username or user ID
+        
+        if user_id:
+            logger.debug(f"Rate limiting based on user: {user_id}")
+            return f"user:{user_id}"
+        else:
+            # Fall back to IP if token doesn't contain user ID
+            return get_remote_address(request)
+    except Exception as e:
+        # On any error, fall back to IP address
+        logger.debug(f"Failed to extract user ID from token, falling back to IP: {e}")
+        return get_remote_address(request)
+
+# Default limiter still uses IP address
+limiter = Limiter(key_func=get_remote_address)
 
 # --- Async function to create tables ---
 async def create_db_tables():
@@ -62,8 +105,6 @@ async def lifespan(app: FastAPI):
 # Create database tables moved to lifespan
 # Base.metadata.create_all(bind=engine) # <--- REMOVE THIS LINE
 
-load_dotenv()
-
 # Setup Langfuse
 SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key_needs_to_be_changed")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "default_secret_key_needs_to_be_changed")
@@ -86,6 +127,10 @@ app = FastAPI(
 )
 
 # Removed Redis rate limiter startup event
+
+# Add rate limiting exception handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Add CORS middleware
 app.add_middleware(

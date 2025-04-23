@@ -139,9 +139,9 @@ services:
       - POSTGRES_URL=postgresql://user:password@postgres:5432/fastapi_db
       - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/fastapi_db
       - NEO4J_URL=neo4j://neo4j:7687
-      - NEO4J_USERNAME="neo4j"
-      - NEO4J_PASSWORD="password"
-      - MILVUS_URL=milvus-standalone:19530
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=password
+      - MILVUS_HOST=milvus-standalone
       - MINIO_URL=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
