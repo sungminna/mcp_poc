@@ -1,13 +1,44 @@
-# react-mcp
+# velt
 
-**react-mcp** is a FastAPI-based backend application that integrates a ReAct language agent (via LangChain), a Neo4j knowledge graph, a Milvus vector store, PostgreSQL, and Redis to deliver a personalized, retrieval-augmented conversational chatbot experience.
+**velt** is a FastAPI-based backend application that integrates a ReAct language agent (via LangGraph), a Neo4j knowledge graph, a Milvus vector store, PostgreSQL, and Redis to deliver a personalized, retrieval-augmented conversational chatbot experience.
 
+---
+Demo Service: https://delosplatform.com
+Contact: sungmin.na330@gmail.com
+Directory: https://my.surfit.io/w/528136765
 ---
 
 ## 🚀 Project Overview
 ![image](https://github.com/user-attachments/assets/6006246e-763e-4eef-b0b0-feca5bae6b50)
 
+- LLM과 대화를 통해 개인화된 정보를 수집한다. 추후에 수집된 정보를 기반으로 개인화된 답변을 제공한다. 
+- 개인화된(취향, 상태, 등..)에 대한 정보는 그래프 DB에 저장한다. 유저 질의와 유사한 키워드를 찾기 위해 벡터 DB도 활용한다.
+- 그래프 형태 및 구성
+  - 유저) 나는 햄버거를 좋아해
+  - LLM) 그렇구나!!
+  - 유저 질의에서 LLM을 활용해 관계를 추출한다
+  - Knowledge Graph: (유저) --좋아한다-- (햄버거) --포함한다-- (음식)
+  - 위와 같은 형태로 저장된다. 상위의 개념도 같이 그래프에 넣어 현실 대화를 대응할 수 있다. ex)나는 어떤 음식을 좋아해? or 오늘 저녁에 먹을 음식 추천해줘
+- 그래프 탐색
+  - Q) 나 미술 좋아하니?
+  - LLM) 너가 미술을 좋아한다고 말한적이 있네...
+  - 유저 질의에서 LLM을 활용해 키워드를 추출한다
+  - 그래프에서 1홉 및 2홉의 노드(객체)와 직접적인 엣지(관계)를 모두 검색한다.
+  - 추가로 그래프와 연결된 하위 개념도 검색한다. ex) 키워드가 음식인 경우 햄버거와의 관계도 추가한다
+  - 관계를 LLM의 프롬프트에 추가해 증강된 답변을 유저에게 제공한다
+- 검증 결과
+  - 노드와 엣지 각각 적절한 탐색을 수행하고 관련된 정보를 기반으로 LLM이 답변을 해 준다
+  - DB접근에 병목이 있는 것으로 추정(최적화 필요)
+  - 적절한 데이터로 LLM이 증강되고 있지만, Relevent한 답변을 제공하고 있는지는 추가 파악 필요(성능 향상 필요)
+  - 동적으로 Graph를 구축하고, 이를 기반으로 초개인화된 LLM을 구축할 수 있다
+- 추가 사항
+  - 유저와 유저간의 관계를 분석할 것이 아니라면, 단순 RDB기반으로 구축 가능하다.(성능이나 용량 면에서 추가 교차 검증 필요)
+  - 실시간 대규모 환경에서의 GraphDB(Neo.4j)의 성능 검증이 필요하다
+  - 프롬프트의 개선이 필요하다. 엣지 케이스에 대한 처리를 해 주었음에도 불구하고 Instruction을 따르지 않는 경우가 드물게 있다. (모델 성능 이슈?)
+  - 현재는 DB쿼리를 하드코딩하여 사용하고 있다. Text to Cypher(SQL)을 활용해 MCP로 사용 가능할 것으로 보인다. (성능 검증 필요)
+  - RAG의 한계? 컨텍스트를 증강하게 되면 오히려 컨텍스트에 치중한 답변을 제시한다. 즉, 그라운딩 없이 대화하는 것에 비해 부자연스러운 답변을 제시한다. (해결 필요)
 
+---
 - **Personalized Chatbot**: Leverages user profile data, preferences, and relationships stored in Neo4j to provide context-aware responses.
 - **Retrieval-Augmented Generation**: Uses Milvus to store and search OpenAI embeddings of user data and chatbot context, enriching prompts for the REACT agent.
 - **Structured Personal Information**: Extracts user statements, preferences, and attributes as structured JSON, then persists them into Neo4j nodes and relationships.
