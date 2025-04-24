@@ -41,7 +41,7 @@
 
         try {
             // Replace with your actual API endpoint if different
-            const response = await fetch('/api/users/', {
+            const response = await fetch('/api/v1/users/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

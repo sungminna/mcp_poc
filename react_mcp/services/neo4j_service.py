@@ -1,3 +1,5 @@
+"""Neo4j service module: manages async connections and queries to the knowledge graph, handles OpenAI embedding generation with Redis caching, and integrates Milvus vector store operations."""
+
 import os
 from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession
 from dotenv import load_dotenv
@@ -7,14 +9,13 @@ import asyncio
 from functools import partial
 from openai import AsyncOpenAI, OpenAIError
 from datetime import datetime
-import json # Added import for JSON serialization
-import redis.asyncio as aioredis  # Added async Redis client import
+import json  # JSON utilities for serialization
+import redis.asyncio as aioredis  # Async Redis client for embedding cache
 
-# Import Milvus service - Remove unused fields if applicable
-# Updated import to remove non-existent names
-from .milvus_service import milvus_service, EMBEDDING_DIMENSION, OPENAI_EMBEDDING_MODEL
-# ... potentially remove MILVUS_NEO4J_NODE_ID_FIELD, MILVUS_NEO4J_REFS_FIELD if not used elsewhere
+# Import Milvus vector store client and embedding configuration
+from .milvus_service import milvus_service, EMBEDDING_DIMENSION, OPENAI_EMBEDDING_MODEL  # Milvus client and embedding config
 
+# Load environment variables for Neo4j and Redis
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -25,17 +26,19 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 
 aclient = AsyncOpenAI()
 
-# Initialize Redis client singleton for embedding cache
+# Singleton Redis client for embedding cache
 _redis_client: aioredis.Redis | None = None
 
 def get_redis_client() -> aioredis.Redis:
+    """Singleton accessor for Redis client used to cache embeddings."""
     global _redis_client
     if _redis_client is None:
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         _redis_client = aioredis.from_url(redis_url, encoding="utf-8", decode_responses=True)
     return _redis_client
 
-# --- Async Neo4j Helper Functions ---
+# Async helper functions for Neo4j database operations
+
 async def _async_run_write_query(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
     """Runs a write query within a session and returns the result summary asynchronously."""
     try:
@@ -91,14 +94,16 @@ async def _async_create_relationship_get_id(driver: AsyncDriver, query: str, par
         logger.error(f"Async create relationship get ID failed: {query} | Params: {params} | Error: {e}", exc_info=True)
         raise
 
-# --- Neo4jService Class --- 
+# Core class: Neo4jService - handles graph operations and embedding workflows
 
 class Neo4jService:
+    """Service managing the Neo4j driver lifecycle, graph queries, and embedding workflows."""
     _driver: AsyncDriver | None = None
-    # Added asyncio Lock for Milvus check/insert logic
+    # Lock to synchronize Milvus vector checks and insertions
     _milvus_insert_lock = asyncio.Lock()
 
     async def connect(self):
+        """Establishes an async driver connection to Neo4j and verifies connectivity."""
         if self._driver is None:
             try:
                 logger.info(f"Attempting to connect to Neo4j at {NEO4J_URI}")
@@ -157,7 +162,7 @@ class Neo4jService:
             return [0.0] * EMBEDDING_DIMENSION
 
     async def create_indexes(self):
-        """Creates necessary constraints (vector indexes are now in Milvus)."""
+        """Ensure unique constraints in Neo4j; vector indexing is performed by Milvus."""
         driver = self.get_driver()
         
         constraint_queries = [
@@ -179,14 +184,9 @@ class Neo4jService:
                      logger.warning(f"Constraint '{constraint_name}' creation failed or thread execution error: {result}")
                 else:
                      logger.info(f"Constraint '{constraint_name}' creation attempted (run in thread).")
-
-            # Original logging kept for reference, can be removed if above is sufficient
-            # await asyncio.to_thread(_sync_run_write_query, driver, constraint_query)
-            # logger.info("Constraint 'user_username' creation attempted (run in thread).")
         except Exception as e:
             # This catch might be redundant now with gather handling exceptions, but kept for safety
             logger.warning(f"Error during constraint creation process: {e}")
-            # Continue if constraint fails?
 
         logger.info("Neo4j index creation step skipped (vector indexes moved to Milvus).")
 
@@ -214,8 +214,10 @@ class Neo4jService:
             return None
 
     async def save_personal_information(self, username: str, info_list: list[dict]):
-        """Saves info to Neo4j, checks Milvus for existing text vectors, 
-           saves new vectors to Milvus, and links Neo4j elements to Milvus IDs."""
+        """Merge personal info into Neo4j and manage vector storage:
+           1) Merge nodes/relationships in Neo4j.
+           2) Generate/cache embeddings.
+           3) Insert new vectors into Milvus."""
         driver = self.get_driver()
         
         # 1. Check if user exists (remains the same)
@@ -316,21 +318,53 @@ class Neo4jService:
             node_text = value
             rel_text = relationship_verb
             
-            # --- Create/Merge Neo4j Elements --- 
+            # --- Check for existing Information node by value or key (not necessarily both) ---
             neo4j_node_id = None
+            try:
+                find_existing_query = (
+                    "MATCH (i:Information) "
+                    "WHERE i.value = $value OR i.key = $key "
+                    "RETURN elementId(i) AS node_id, i.key AS old_key, i.value AS old_value"
+                )
+                existing_node = await _async_fetch_single(driver, find_existing_query, {"key": key_str, "value": value})
+                if existing_node:
+                    neo4j_node_id = existing_node["node_id"]
+                    # If the existing node was a category node but is now being used as a general node, update its key to the new key
+                    if existing_node["old_key"] == "Category" and key_str != "Category":
+                        update_key_query = (
+                            "MATCH (i:Information) WHERE elementId(i) = $node_id SET i.key = $key, i.updatedAt = timestamp() RETURN elementId(i)"
+                        )
+                        await _async_run_write_query(driver, update_key_query, {"node_id": neo4j_node_id, "key": key_str})
+                else:
+                    # 없으면 새로 생성
+                    create_node_query = (
+                        "CREATE (i:Information {key: $key, value: $value, createdAt: timestamp(), children: []}) "
+                        "RETURN elementId(i)"
+                    )
+                    node_params = {"key": key_str, "value": value}
+                    neo4j_node_id = await _async_create_node_get_id(driver, create_node_query, node_params)
+                    if neo4j_node_id is None: raise ValueError(f"Failed to create/get node ID for {value}")
+            except Exception as e:
+                logger.error(f"Error checking/creating/updating Information node for key='{key_str}', value='{value}': {e}", exc_info=True)
+                continue
+
+            # --- Create/Merge Neo4j Elements --- 
             neo4j_rel_id = None
             neo4j_key_node_id = None
             try:
-                # Step 2a: Node
-                create_node_query = (
-                    "MERGE (i:Information {key: $key, value: $value}) "
-                    "ON CREATE SET i.createdAt = timestamp(), i.children = [] "
-                    "ON MATCH SET i.updatedAt = timestamp() "
-                    "RETURN elementId(i)"
-                )
-                node_params = {"key": key_str, "value": value}
-                neo4j_node_id = await _async_create_node_get_id(driver, create_node_query, node_params)
-                if neo4j_node_id is None: raise ValueError(f"Failed to create/get node ID for {value}")
+                if neo4j_node_id:
+                    neo4j_node_id = neo4j_node_id
+                else:
+                    # Step 2a: Node
+                    create_node_query = (
+                        "MERGE (i:Information {key: $key, value: $value}) "
+                        "ON CREATE SET i.createdAt = timestamp(), i.children = [] "
+                        "ON MATCH SET i.updatedAt = timestamp() "
+                        "RETURN elementId(i)"
+                    )
+                    node_params = {"key": key_str, "value": value}
+                    neo4j_node_id = await _async_create_node_get_id(driver, create_node_query, node_params)
+                    if neo4j_node_id is None: raise ValueError(f"Failed to create/get node ID for {value}")
 
                 # Step 2b: Relationship
                 create_rel_query = (
@@ -347,15 +381,26 @@ class Neo4jService:
 
                 # Step 2c: Key Node & Hierarchy
                 key_node_key_prop = "Category"
-                create_key_node_query = (
-                    "MERGE (k:Information {key: $key_node_key, value: $key_value}) "
-                    "ON CREATE SET k.createdAt = timestamp(), k.children = [] "
-                    "ON MATCH SET k.updatedAt = timestamp() "
-                    "RETURN elementId(k)"
-                )
                 key_node_params = {"key_node_key": key_node_key_prop, "key_value": key_str}
-                neo4j_key_node_id = await _async_create_node_get_id(driver, create_key_node_query, key_node_params)
-                if neo4j_key_node_id is None: raise ValueError(f"Failed to create/get key node ID for {key_str}")
+                neo4j_key_node_id = None
+                try:
+                    # 1. 기존 카테고리 노드가 있는지 확인
+                    find_key_node_query = (
+                        "MATCH (k:Information {key: $key_node_key, value: $key_value}) RETURN elementId(k) AS key_node_id"
+                    )
+                    key_node = await _async_fetch_single(driver, find_key_node_query, key_node_params)
+                    if key_node:
+                        neo4j_key_node_id = key_node["key_node_id"]
+                    else:
+                        # 없으면 새로 생성
+                        create_key_node_query = (
+                            "CREATE (k:Information {key: $key_node_key, value: $key_value, createdAt: timestamp(), children: []}) RETURN elementId(k)"
+                        )
+                        neo4j_key_node_id = await _async_create_node_get_id(driver, create_key_node_query, key_node_params)
+                        if neo4j_key_node_id is None: raise ValueError(f"Failed to create/get key node ID for {key_str}")
+                except Exception as e:
+                    logger.error(f"Error checking/creating key node for key='{key_str}': {e}", exc_info=True)
+                    continue
                 
                 create_hierarchy_rel_query = (
                     "MATCH (i:Information) WHERE elementId(i) = $node_id "
@@ -434,7 +479,10 @@ class Neo4jService:
         return True # Indicate overall process completion
 
     async def find_similar_information(self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75) -> List[str]:
-        """Finds info via Milvus, queries Neo4j for user nodes, expands via children, returns context."""
+        """Retrieve context by combining vector search and graph traversal:
+           - Embed keywords and search Milvus.
+           - Query Neo4j for direct and child relationships.
+           - Format and return summary sentences."""
         if not keywords:
             return []
 

@@ -1,20 +1,20 @@
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
 import crud.user
 from core import security
-from core.config import ACCESS_TOKEN_EXPIRE_MINUTES
-from database import get_db
+from core.config import ACCESS_TOKEN_EXPIRE_MINUTES, RATE_LIMIT_LOGIN
+from core.depends import get_db, limiter  # Import the rate limiter
 from models.user import Token
-from main import limiter, DEFAULT_LOGIN_LIMIT  # Import the limiter and rate limit
 
 router = APIRouter()
 
-@router.post("/api/auth/token", response_model=Token, tags=["auth"])
-@limiter.limit(DEFAULT_LOGIN_LIMIT)  # Use configurable rate limit for login attempts
+@router.post("/token", response_model=Token, tags=["auth"])
+@limiter.limit(RATE_LIMIT_LOGIN)  # Use configurable rate limit for login attempts
 async def login_for_access_token(request: Request, db: AsyncSession = Depends(get_db), form_data: OAuth2PasswordRequestForm = Depends()):
     user = await crud.user.get_user_by_username(db, username=form_data.username)
     if not user or not security.verify_password(form_data.password, user.hashed_password):

@@ -59,7 +59,7 @@ info_extraction_prompt = ChatPromptTemplate.from_messages([
 - The 'value' must be a noun or adjective, and **always in singular form** (e.g., 'cat' not 'cats', 'bike' not 'bikes').
 - The 'relationship' must be a verb describing the user's connection, **always in singular form** (e.g., 'likes', 'dislikes', 'is', 'has').
 - The 'lifetime' must be a duration ('permanent', 'long', 'short') or an ISO 8601 datetime string.
-- The 'key' must be the **closest superordinate concept (immediate hypernym)** of the 'value'. It should be a noun representing the direct category the value belongs to. Avoid using relationship types or overly broad categories as the key.
+- The 'key' must be the **closest superordinate concept (immediate hypernym)** of the 'value'. It must be a noun or adjective representing the direct category the value belongs to. Avoid using relationship types or overly broad categories as the key.
 - Do not confuse questions with preferences, attributes, or statements. Questions might not include information about the user. 
 
 # Output Format
