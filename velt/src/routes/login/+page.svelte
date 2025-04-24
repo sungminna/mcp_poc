@@ -31,7 +31,7 @@
             formData.append('password', password);
 
             // Replace with your actual API endpoint if different
-            const response = await fetch('/api/auth/token', {
+            const response = await fetch('/api/v1/auth/token', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',

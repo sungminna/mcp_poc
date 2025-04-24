@@ -44,7 +44,7 @@
         errorMessage = '';
         try {
             const token = localStorage.getItem('authToken');
-            const res = await fetch('/api/chat/sessions', { headers: { 'Authorization': `Bearer ${token}` } });
+            const res = await fetch('/api/v1/chat/sessions', { headers: { 'Authorization': `Bearer ${token}` } });
             if (!res.ok) throw new Error('세션 목록을 가져오는데 실패했습니다.');
             sessions = await res.json();
         } catch (err: any) {
@@ -59,7 +59,7 @@
         errorMessage = '';
         try {
             const token = localStorage.getItem('authToken');
-            const res = await fetch(`/api/chat/${sessionId}/messages`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const res = await fetch(`/api/v1/chat/${sessionId}/messages`, { headers: { 'Authorization': `Bearer ${token}` } });
             if (!res.ok) throw new Error('메시지 목록을 가져오는데 실패했습니다.');
             const data = await res.json();
             messages = data.map((m: any) => ({
@@ -94,7 +94,7 @@
         try {
             const body: any = { user_message: inputText };
             if (selectedSessionId) body.session_id = selectedSessionId;
-            const response = await fetch('/api/chat/', { 
+            const response = await fetch('/api/v1/chat/', { 
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -203,7 +203,7 @@
     async function deleteChatSession(sessionId: number) {
         const token = localStorage.getItem('authToken');
         try {
-            const res = await fetch(`/api/chat/${sessionId}`, {
+            const res = await fetch(`/api/v1/chat/${sessionId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });

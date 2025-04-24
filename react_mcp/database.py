@@ -5,7 +5,7 @@ from core.config import DATABASE_URL
 
 # Use create_async_engine
 engine = create_async_engine(
-    DATABASE_URL, 
+    str(DATABASE_URL), 
     # connect_args={"check_same_thread": False} # Not needed/applicable for asyncpg
     echo=True # Optional: Log SQL queries, helpful for debugging
 )

@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os 
 import asyncio
-from main import langfuse_handler
+from core.depends import langfuse_handler
 
 load_dotenv()
 
