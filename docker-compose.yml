@@ -134,21 +134,8 @@ services:
     container_name: fastapi_app
     ports:
       - "8000:8000"
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - POSTGRES_URL=postgresql://user:password@postgres:5432/fastapi_db
-      - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/fastapi_db
-      - NEO4J_URL=neo4j://neo4j:7687
-      - NEO4J_USERNAME=neo4j
-      - NEO4J_PASSWORD=password
-      - MILVUS_HOST=milvus-standalone
-      - MINIO_URL=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - ETCD_URL=etcd:2379
-      - LANGFUSE_SECRET_KEY="sk-lf-f1cafbfe-5902-497e-a3d1-a5822d1d0810"
-      - LANGFUSE_PUBLIC_KEY="pk-lf-910846e3-aab1-4bf9-b260-4f35c51f77bd"
-      - LANGFUSE_HOST="http://34.66.130.204:3000"
+    env_file:
+      - .env.production
     networks:
       - app-network
     depends_on:
