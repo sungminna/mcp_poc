@@ -329,7 +329,7 @@ class Neo4jService:
                 existing_node = await _async_fetch_single(driver, find_existing_query, {"key": key_str, "value": value})
                 if existing_node:
                     neo4j_node_id = existing_node["node_id"]
-                    # 만약 기존 노드가 카테고리 노드였다가 일반 노드로 쓰이는 경우 key 업데이트
+                    # If the existing node was a category node but is now being used as a general node, update its key to the new key
                     if existing_node["old_key"] == "Category" and key_str != "Category":
                         update_key_query = (
                             "MATCH (i:Information) WHERE elementId(i) = $node_id SET i.key = $key, i.updatedAt = timestamp() RETURN elementId(i)"
