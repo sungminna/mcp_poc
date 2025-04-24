@@ -5,6 +5,8 @@
 ---
 
 ## 🚀 Project Overview
+![image](https://github.com/user-attachments/assets/6006246e-763e-4eef-b0b0-feca5bae6b50)
+
 
 - **Personalized Chatbot**: Leverages user profile data, preferences, and relationships stored in Neo4j to provide context-aware responses.
 - **Retrieval-Augmented Generation**: Uses Milvus to store and search OpenAI embeddings of user data and chatbot context, enriching prompts for the REACT agent.
