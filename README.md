@@ -3,9 +3,11 @@
 **velt** is a FastAPI-based backend application that integrates a ReAct language agent (via LangGraph), a Neo4j knowledge graph, a Milvus vector store, PostgreSQL, and Redis to deliver a personalized, retrieval-augmented conversational chatbot experience.
 
 ---
-Demo Service: https://delosplatform.com
-Contact: sungmin.na330@gmail.com
-Directory: https://my.surfit.io/w/528136765
+## Demo Service: https://delosplatform.com
+
+## Contact: sungmin.na330@gmail.com
+
+## Directory: https://my.surfit.io/w/528136765
 ---
 
 ## 🚀 Project Overview
