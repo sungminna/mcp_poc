@@ -1,7 +1,8 @@
+"""Main application module: configures FastAPI app with lifecycle events, database schema initialization, graph and vector services setup, rate limiting, CORS, and API routers."""
 from fastapi import FastAPI, Depends, Request
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager # Import asynccontextmanager
-import logging # Import logging
+from contextlib import asynccontextmanager  # Async context manager for application lifespan
+import logging  # Logging facility for application events
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -22,57 +23,53 @@ import models.chat  # Register chat models so their tables are created
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-load_dotenv()  # Load environment variables first
+# Load environment variables from .env file
+load_dotenv()
 
-# --- Rate limiting setup with configurable limits ---
+# Rate limiting configuration using environment variables with sensible defaults
 DEFAULT_CHAT_LIMIT = os.getenv("RATE_LIMIT_CHAT", "30/minute")
 DEFAULT_LOGIN_LIMIT = os.getenv("RATE_LIMIT_LOGIN", "10/minute")
 DEFAULT_REGISTER_LIMIT = os.getenv("RATE_LIMIT_REGISTER", "5/hour")
 
-# Secret key for JWT
+# JWT secret key for signing and verifying tokens
 SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key_needs_to_be_changed")
 
 # Custom key function for chat endpoint based on user token
 def get_user_id_from_token(request: Request):
-    try:
-        # Extract token from Authorization header
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            # Fall back to IP if no valid auth header
-            return get_remote_address(request)
+    # Determine rate limiter key: use JWT subject or fallback to client IP
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        # Fallback to IP when Authorization header is missing or invalid
+        return get_remote_address(request)
             
-        token = auth_header.replace("Bearer ", "")
-        
-        # Decode JWT token to get user ID
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        user_id = payload.get("sub")  # 'sub' typically contains the username or user ID
-        
-        if user_id:
-            logger.debug(f"Rate limiting based on user: {user_id}")
-            return f"user:{user_id}"
-        else:
-            # Fall back to IP if token doesn't contain user ID
-            return get_remote_address(request)
-    except Exception as e:
-        # On any error, fall back to IP address
-        logger.debug(f"Failed to extract user ID from token, falling back to IP: {e}")
+    token = auth_header.replace("Bearer ", "")
+    
+    # Decode JWT token to get user ID
+    payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    user_id = payload.get("sub")  # 'sub' typically contains the username or user ID
+    
+    if user_id:
+        logger.debug(f"Rate limiting based on user: {user_id}")
+        return f"user:{user_id}"
+    else:
+        # Fall back to IP if token doesn't contain user ID
         return get_remote_address(request)
 
-# Default limiter still uses IP address
+# Initialize rate limiter with IP-based key function
 limiter = Limiter(key_func=get_remote_address)
 
-# --- Async function to create tables ---
+# Async function to ensure database schema at startup
 async def create_db_tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables checked/created.")
+    logger.info("Database schema ensured.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Application startup...")
+    # Application startup and shutdown lifecycle
+    logger.info("Starting application...")
     try:
-        # Removed Redis rate limiter initialization
+        # Initialize database, graph, and vector services
         
         # Create database tables asynchronously
         await create_db_tables()
@@ -105,7 +102,7 @@ async def lifespan(app: FastAPI):
 # Create database tables moved to lifespan
 # Base.metadata.create_all(bind=engine) # <--- REMOVE THIS LINE
 
-# Setup Langfuse
+# Configure Langfuse callback for request tracing
 SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key_needs_to_be_changed")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "default_secret_key_needs_to_be_changed")
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "default_public_key_needs_to_be_changed")
@@ -117,22 +114,18 @@ langfuse_handler = CallbackHandler(
     host=LANGFUSE_HOST
 )
 
-# Setup FastAPI
-from routers import general, ask, users, auth # Import the new auth router
-
-
-# Remove old app instantiation and create FastAPI
+# Mount API routers
 app = FastAPI(
     lifespan=lifespan,
 )
 
-# Removed Redis rate limiter startup event
+# Redis limiter initialization removed
 
-# Add rate limiting exception handler
+# Register rate limit exceeded exception handler
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Add CORS middleware
+# Enable CORS for specified origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*").split(","),
@@ -141,7 +134,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include the routers
+# Mount API routers
 app.include_router(auth.router) # Include the auth router
 app.include_router(users.router) # Include the users router (now requires auth for some endpoints)
 app.include_router(general.router)

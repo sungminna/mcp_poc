@@ -1,3 +1,5 @@
+"""Neo4j service module: manages async connections and queries to the knowledge graph, handles OpenAI embedding generation with Redis caching, and integrates Milvus vector store operations."""
+
 import os
 from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession
 from dotenv import load_dotenv
@@ -7,14 +9,13 @@ import asyncio
 from functools import partial
 from openai import AsyncOpenAI, OpenAIError
 from datetime import datetime
-import json # Added import for JSON serialization
-import redis.asyncio as aioredis  # Added async Redis client import
+import json  # JSON utilities for serialization
+import redis.asyncio as aioredis  # Async Redis client for embedding cache
 
-# Import Milvus service - Remove unused fields if applicable
-# Updated import to remove non-existent names
-from .milvus_service import milvus_service, EMBEDDING_DIMENSION, OPENAI_EMBEDDING_MODEL
-# ... potentially remove MILVUS_NEO4J_NODE_ID_FIELD, MILVUS_NEO4J_REFS_FIELD if not used elsewhere
+# Import Milvus vector store client and embedding configuration
+from .milvus_service import milvus_service, EMBEDDING_DIMENSION, OPENAI_EMBEDDING_MODEL  # Milvus client and embedding config
 
+# Load environment variables for Neo4j and Redis
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -25,17 +26,19 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 
 aclient = AsyncOpenAI()
 
-# Initialize Redis client singleton for embedding cache
+# Singleton Redis client for embedding cache
 _redis_client: aioredis.Redis | None = None
 
 def get_redis_client() -> aioredis.Redis:
+    """Singleton accessor for Redis client used to cache embeddings."""
     global _redis_client
     if _redis_client is None:
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         _redis_client = aioredis.from_url(redis_url, encoding="utf-8", decode_responses=True)
     return _redis_client
 
-# --- Async Neo4j Helper Functions ---
+# Async helper functions for Neo4j database operations
+
 async def _async_run_write_query(driver: AsyncDriver, query: str, params: Dict[str, Any] = None):
     """Runs a write query within a session and returns the result summary asynchronously."""
     try:
@@ -91,14 +94,16 @@ async def _async_create_relationship_get_id(driver: AsyncDriver, query: str, par
         logger.error(f"Async create relationship get ID failed: {query} | Params: {params} | Error: {e}", exc_info=True)
         raise
 
-# --- Neo4jService Class --- 
+# Core class: Neo4jService - handles graph operations and embedding workflows
 
 class Neo4jService:
+    """Service managing the Neo4j driver lifecycle, graph queries, and embedding workflows."""
     _driver: AsyncDriver | None = None
-    # Added asyncio Lock for Milvus check/insert logic
+    # Lock to synchronize Milvus vector checks and insertions
     _milvus_insert_lock = asyncio.Lock()
 
     async def connect(self):
+        """Establishes an async driver connection to Neo4j and verifies connectivity."""
         if self._driver is None:
             try:
                 logger.info(f"Attempting to connect to Neo4j at {NEO4J_URI}")
@@ -157,7 +162,7 @@ class Neo4jService:
             return [0.0] * EMBEDDING_DIMENSION
 
     async def create_indexes(self):
-        """Creates necessary constraints (vector indexes are now in Milvus)."""
+        """Ensure unique constraints in Neo4j; vector indexing is performed by Milvus."""
         driver = self.get_driver()
         
         constraint_queries = [
@@ -179,14 +184,9 @@ class Neo4jService:
                      logger.warning(f"Constraint '{constraint_name}' creation failed or thread execution error: {result}")
                 else:
                      logger.info(f"Constraint '{constraint_name}' creation attempted (run in thread).")
-
-            # Original logging kept for reference, can be removed if above is sufficient
-            # await asyncio.to_thread(_sync_run_write_query, driver, constraint_query)
-            # logger.info("Constraint 'user_username' creation attempted (run in thread).")
         except Exception as e:
             # This catch might be redundant now with gather handling exceptions, but kept for safety
             logger.warning(f"Error during constraint creation process: {e}")
-            # Continue if constraint fails?
 
         logger.info("Neo4j index creation step skipped (vector indexes moved to Milvus).")
 
@@ -214,8 +214,10 @@ class Neo4jService:
             return None
 
     async def save_personal_information(self, username: str, info_list: list[dict]):
-        """Saves info to Neo4j, checks Milvus for existing text vectors, 
-           saves new vectors to Milvus, and links Neo4j elements to Milvus IDs."""
+        """Merge personal info into Neo4j and manage vector storage:
+           1) Merge nodes/relationships in Neo4j.
+           2) Generate/cache embeddings.
+           3) Insert new vectors into Milvus."""
         driver = self.get_driver()
         
         # 1. Check if user exists (remains the same)
@@ -434,7 +436,10 @@ class Neo4jService:
         return True # Indicate overall process completion
 
     async def find_similar_information(self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75) -> List[str]:
-        """Finds info via Milvus, queries Neo4j for user nodes, expands via children, returns context."""
+        """Retrieve context by combining vector search and graph traversal:
+           - Embed keywords and search Milvus.
+           - Query Neo4j for direct and child relationships.
+           - Format and return summary sentences."""
         if not keywords:
             return []
 
