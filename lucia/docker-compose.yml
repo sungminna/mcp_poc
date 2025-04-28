@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j # Use an appropriate Neo4j version
+    container_name: neo4j_db_lucia
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    volumes:
+      - neo4j_data:/data
+    environment:
+      - NEO4J_AUTH=neo4j/password # Change password in production!
+      # - NEO4J_PLUGINS=["apoc", "graph-data-science"] # Uncomment to add plugins if needed
+    networks: # Add service to network
+      - app-network
+
+
+  # Milvus Dependencies: etcd and MinIO
+  etcd:
+    container_name: milvus-etcd_lucia
+    image: quay.io/coreos/etcd:v3.5.18
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - ./volumes/etcd:/etcd # Adjusted volume path
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - app-network
+
+  minio:
+    container_name: milvus-minio_lucia
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9001:9001" # Console port
+      - "9000:9000" # API port
+    volumes:
+      - ./volumes/minio:/minio_data # Adjusted volume path
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - app-network
+
+  # Milvus Standalone Service
+  milvus-standalone:
+    container_name: milvus-standalone_lucia
+    image: milvusdb/milvus # Using a slightly older version for potential compatibility, adjust if needed
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined # Required by Milvus
+    environment:
+      ETCD_ENDPOINTS: etcd:2379 # Service name from this docker-compose
+      MINIO_ADDRESS: minio:9000  # Service name from this docker-compose
+      # MINIO_REGION: us-east-1 # Optional: Set if needed
+    volumes:
+      - ./volumes/milvus:/var/lib/milvus # Adjusted volume path
+    ports:
+      - "19530:19530" # Milvus SDK port
+      - "9091:9091"   # Milvus metrics/health port
+    depends_on: # Ensure dependencies start first
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s # Give Milvus time to start
+      timeout: 20s
+      retries: 3
+    networks:
+      - app-network
+
+  # Milvus Web UI (Attu)
+  attu:
+    container_name: milvus-attu_lucia
+    image: bitnami/attu:latest # Use Attu version compatible with Milvus v2.5.x
+    ports:
+      - "7000:3000" # Map host port 7000 to container port 3000 (Attu default)
+    environment:
+      MILVUS_URL: milvus-standalone:19530 # Point Attu to the Milvus service
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy # Wait for Milvus to be healthy
+    networks:
+      - app-network
+
+volumes:
+  neo4j_data:
+  etcd_data: # Renamed from etcd to avoid conflict if volumes are named implicitly
+    driver_opts:
+      type: none
+      device: ${PWD}/volumes/etcd # Bind mount for etcd
+      o: bind
+  minio_data: # Renamed from minio
+    driver_opts:
+      type: none
+      device: ${PWD}/volumes/minio # Bind mount for minio
+      o: bind
+  milvus_data: # Renamed from milvus
+    driver_opts:
+      type: none
+      device: ${PWD}/volumes/milvus # Bind mount for milvus
+      o: bind
+
+networks: # Define the shared network
+  app-network:
+    driver: bridge
+

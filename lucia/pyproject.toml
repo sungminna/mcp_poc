@@ -1,0 +1,25 @@
+[project]
+name = "lucia"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "sungminna",email = "sungmin.na330@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "openai (>=1.76.0,<2.0.0)",
+    "pydantic (>=2.11.3,<3.0.0)",
+    "neo4j (>=5.28.1,<6.0.0)",
+    "python-dotenv (>=1.1.0,<2.0.0)",
+    "pymilvus (>=2.5.7,<3.0.0)",
+]
+
+
+packages = [
+    { include = "lucia", from = "src" }
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
