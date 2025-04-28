@@ -8,12 +8,12 @@ services:
       - "7474:7474" # HTTP
       - "7687:7687" # Bolt
     volumes:
-      - neo4j_data:/data
+      - neo4j_data_lucia:/data
     environment:
       - NEO4J_AUTH=neo4j/password # Change password in production!
       # - NEO4J_PLUGINS=["apoc", "graph-data-science"] # Uncomment to add plugins if needed
     networks: # Add service to network
-      - app-network
+      - app-network_lucia
 
 
   # Milvus Dependencies: etcd and MinIO
@@ -26,7 +26,7 @@ services:
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
       - ETCD_SNAPSHOT_COUNT=50000
     volumes:
-      - ./volumes/etcd:/etcd # Adjusted volume path
+      - ./volumes/etcd_lucia:/etcd # Adjusted volume path
     command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
@@ -34,7 +34,7 @@ services:
       timeout: 20s
       retries: 3
     networks:
-      - app-network
+      - app-network_lucia
 
   minio:
     container_name: milvus-minio_lucia
@@ -46,7 +46,7 @@ services:
       - "9001:9001" # Console port
       - "9000:9000" # API port
     volumes:
-      - ./volumes/minio:/minio_data # Adjusted volume path
+      - ./volumes/minio_lucia:/minio_data # Adjusted volume path
     command: minio server /minio_data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -54,7 +54,7 @@ services:
       timeout: 20s
       retries: 3
     networks:
-      - app-network
+      - app-network_lucia
 
   # Milvus Standalone Service
   milvus-standalone:
@@ -68,7 +68,7 @@ services:
       MINIO_ADDRESS: minio:9000  # Service name from this docker-compose
       # MINIO_REGION: us-east-1 # Optional: Set if needed
     volumes:
-      - ./volumes/milvus:/var/lib/milvus # Adjusted volume path
+      - ./volumes/milvus_lucia:/var/lib/milvus # Adjusted volume path
     ports:
       - "19530:19530" # Milvus SDK port
       - "9091:9091"   # Milvus metrics/health port
@@ -84,7 +84,7 @@ services:
       timeout: 20s
       retries: 3
     networks:
-      - app-network
+      - app-network_lucia
 
   # Milvus Web UI (Attu)
   attu:
@@ -98,27 +98,44 @@ services:
       milvus-standalone:
         condition: service_healthy # Wait for Milvus to be healthy
     networks:
-      - app-network
+      - app-network_lucia
+
+  # Redis service for optional embedding caching
+  redis:
+    image: redis:7.0-alpine
+    container_name: redis_lucia
+    ports:
+      - "6379:6379" # Redis default port
+    volumes:
+      - redis_data_lucia:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - app-network_lucia
 
 volumes:
-  neo4j_data:
-  etcd_data: # Renamed from etcd to avoid conflict if volumes are named implicitly
+  neo4j_data_lucia:
+  etcd_data_lucia: # Renamed from etcd to avoid conflict if volumes are named implicitly
     driver_opts:
       type: none
       device: ${PWD}/volumes/etcd # Bind mount for etcd
       o: bind
-  minio_data: # Renamed from minio
+  minio_data_lucia: # Renamed from minio
     driver_opts:
       type: none
       device: ${PWD}/volumes/minio # Bind mount for minio
       o: bind
-  milvus_data: # Renamed from milvus
+  milvus_data_lucia: # Renamed from milvus
     driver_opts:
       type: none
       device: ${PWD}/volumes/milvus # Bind mount for milvus
       o: bind
+  redis_data_lucia: # Named Docker volume for Redis caching
 
 networks: # Define the shared network
-  app-network:
+  app-network_lucia:
     driver: bridge
 

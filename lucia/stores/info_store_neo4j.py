@@ -4,8 +4,11 @@ from neo4j import AsyncGraphDatabase
 import os
 import asyncio
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 class Neo4jInfoStore(InfoStore):
     def __init__(self, database: str = "neo4j"):
@@ -93,6 +96,16 @@ class Neo4jInfoStore(InfoStore):
         if not keywords:
             return []
         async with self.driver.session(database=self.database) as session:
+            # Check for user existence
+            user_count_res = await session.run(
+                "MATCH (u:User {username: $username}) RETURN count(u) AS cnt",
+                {"username": username}
+            )
+            user_record = await user_count_res.single()
+            if not user_record or user_record["cnt"] == 0:
+                logger.warning(f"Neo4jInfoStore: User '{username}' not found in Neo4j")
+                return []
+            # Proceed with relationship search
             result = await session.run(
                 """
                 MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)

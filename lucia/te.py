@@ -16,11 +16,11 @@ load_dotenv()
 async def tes():
     kw_extractor = OpenAIKeywordExtractor(client=OpenAIClient())
     info_extractor = OpenAIInfoExtractor(client=OpenAIClient())
-    embedding_client = OpenAIEmbeddingClient()
+    embedding_client = OpenAIEmbeddingClient(use_cache=True)
     vector_store = MilvusVectorStore()
     info_store = Neo4jInfoStore()
-    pipeline = SearchPipeline(keyword_extractor=kw_extractor, embedding_client=embedding_client, vector_store=vector_store, info_extractor=info_extractor, info_store=info_store)
-    user_message = "what food do i like?"
+    pipeline = KnowledgePipeline(keyword_extractor=kw_extractor, embedding_client=embedding_client, vector_store=vector_store, info_extractor=info_extractor, info_store=info_store)
+    user_message = "i like pizza"
     result = await pipeline.process(user_message, "test_user")
     print(result)
 

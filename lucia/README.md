@@ -36,7 +36,13 @@ info_store = Neo4jInfoStore(driver=neo4j_driver)
 
 # Instantiate pipeline components
 keyword_extractor = LangChainKeywordExtractor()
-embedding_client = OpenAIEmbeddingClient(model_name="text-embedding-3-small")
+embedding_client = OpenAIEmbeddingClient(
+    model_name="text-embedding-3-small",
+    use_cache=True,
+    redis_host="localhost",
+    redis_port=6379,
+    redis_db=0
+)
 vector_store = MilvusVectorStore()
 info_extractor = LangChainInfoExtractor()
 
