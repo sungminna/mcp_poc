@@ -1,24 +1,22 @@
 from typing import Type, List, Dict, Any
-import os
 from openai import OpenAI
 from pydantic import BaseModel
 from .llm_client import LLMClient
+from ..config import settings
 
 
 class OpenAIClient(LLMClient):
-    def __init__(self, api_key: str = None, model_name: str = "gpt-4.1-nano"):
+    def __init__(self, api_key: str = None, model_name: str = None):
         """
         Initialize AsyncOpenAI client for the Responses API.
-        If api_key is not provided, reads from OPENAI_API_KEY env var.
-        model_name should be a text model supporting the Responses API (e.g., 'gpt-4o').
+        If api_key is not provided, reads from settings.openai_api_key.
+        model_name should be a text model supporting the Responses API.
         """
-        key = api_key or os.getenv("OPENAI_API_KEY")
-        if not key:
-            raise ValueError(
-                "OpenAI API key must be provided via api_key parameter or OPENAI_API_KEY env var."
-            )
-        self.client = OpenAI(api_key=key)
-        self.model_name = model_name
+        self.api_key = api_key or settings.openai_api_key
+        if not self.api_key:
+            raise ValueError("OpenAI API key must be provided via api_key parameter or environment variable.")
+        self.client = OpenAI(api_key=self.api_key)
+        self.model_name = model_name or settings.openai_model_name
 
     async def ask(
         self,

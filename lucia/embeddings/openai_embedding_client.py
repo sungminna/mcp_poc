@@ -1,9 +1,9 @@
-import os
 from openai import OpenAI
 from typing import List
 import hashlib
 import json
 import redis.asyncio as aioredis
+from ..config import settings
 
 from .embedding_client import EmbeddingClient
 
@@ -15,25 +15,25 @@ class OpenAIEmbeddingClient(EmbeddingClient):
         Redis connection parameters can be provided or loaded from REDIS_* environment variables.
         Cache time-to-live (TTL) in seconds can be set via cache_ttl_seconds; if None, entries never expire.
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = api_key or settings.openai_api_key
         if not self.api_key:
             raise ValueError("OpenAI API key must be provided via api_key parameter or OPENAI_API_KEY env var.")
         self.client = OpenAI(api_key=self.api_key)
-        self.model_name = model_name
-        self.use_cache = use_cache
+        self.model_name = model_name or settings.embedding_model_name
+        self.use_cache = use_cache or settings.use_redis_cache
         # Optional TTL (in seconds) for cached embeddings; None means no expiration
-        self.cache_ttl_seconds = cache_ttl_seconds
+        self.cache_ttl_seconds = cache_ttl_seconds or settings.cache_ttl_seconds
         if self.use_cache:
-            # Initialize Redis client for caching
-            redis_host = redis_host or os.getenv("REDIS_HOST", "localhost")
-            redis_port = int(redis_port or os.getenv("REDIS_PORT", "6379"))
-            redis_db = int(redis_db or os.getenv("REDIS_DB", "0"))
-            redis_password = redis_password or os.getenv("REDIS_PASSWORD", None)
+            # Initialize Redis client for caching using centralized settings
+            host = redis_host or settings.redis_host
+            port = redis_port or settings.redis_port
+            db = redis_db or settings.redis_db
+            password = redis_password or settings.redis_password
             self.redis_client = aioredis.Redis(
-                host=redis_host,
-                port=redis_port,
-                db=redis_db,
-                password=redis_password,
+                host=host,
+                port=port,
+                db=db,
+                password=password,
                 decode_responses=True
             )
 

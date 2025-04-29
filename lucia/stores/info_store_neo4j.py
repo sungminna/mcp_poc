@@ -1,26 +1,22 @@
 from typing import List, Dict, Any
 from .info_store import InfoStore
 from neo4j import AsyncGraphDatabase
-import os
 import asyncio
-from dotenv import load_dotenv
 import logging
-
-load_dotenv()
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
 class Neo4jInfoStore(InfoStore):
-    def __init__(self, database: str = "neo4j"):
+    def __init__(self, database: str = None):
         """
-        Initialize the Neo4j driver using environment variables.
-        NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD를 사용합니다.
+        Initialize the Neo4j driver using centralized settings.
         """
-        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        user = os.getenv("NEO4J_USER", "neo4j")
-        password = os.getenv("NEO4J_PASSWORD", "password")
+        uri = settings.neo4j_uri
+        user = settings.neo4j_user
+        password = settings.neo4j_password
         self.driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
-        self.database = database
+        self.database = database or settings.neo4j_database
         # Ensure Information.value uniqueness constraint at startup
         asyncio.create_task(self._ensure_value_uniqueness_constraint())
 

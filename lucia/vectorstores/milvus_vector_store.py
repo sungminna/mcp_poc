@@ -1,14 +1,11 @@
 from typing import List, Dict, Any, Optional
 from .vector_store import VectorStore
 import asyncio
-import os
+from ..config import settings
 from pymilvus import (
     connections, utility, Collection, CollectionSchema, FieldSchema, DataType, Index
 )
 from pymilvus.exceptions import MilvusException
-from dotenv import load_dotenv
-
-load_dotenv()
 
 MILVUS_COLLECTION_NAME = "knowledge_vectors"
 MILVUS_VECTOR_FIELD = "embedding"
@@ -24,8 +21,8 @@ VECTOR_INDEX_PARAMS = {
 
 class MilvusVectorStore(VectorStore):
     def __init__(self):
-        self._host = os.getenv("MILVUS_HOST", "localhost")
-        self._port = os.getenv("MILVUS_PORT", "19530")
+        self._host = settings.milvus_host
+        self._port = settings.milvus_port
         self._alias = "default"
         self._collection: Optional[Collection] = None
         self._connect_task = asyncio.create_task(self._connect_and_prepare())
