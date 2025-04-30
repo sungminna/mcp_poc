@@ -76,15 +76,18 @@ class SearchPipeline:
         else:
             result['vector_ids'] = []
 
-        # 3. Personal info search from graph storage
-        info_list: List[str] = []
+        # 3. Personal info search from info storage
+        info_list: List[Dict[str, Any]] = []
         try:
             if keywords and self.info_store:
-                # Find relationships matching keywords in graph storage
+                # Retrieve full info records matching keywords
                 info_list = await self.info_store.find_similar_information(username, keywords)
                 result['info_list'] = info_list
-                result['relationships'] = info_list
-                logger.info(f"Found {len(info_list)} relationships matching keywords.")
+                # Derive human-readable relationship strings
+                result['relationships'] = [
+                    f"{rec['relationship']} {rec['value']}" for rec in info_list
+                ]
+                logger.info(f"Found {len(info_list)} info records matching keywords.")
             else:
                 result['info_list'] = []
                 result['relationships'] = []

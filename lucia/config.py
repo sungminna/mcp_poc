@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     neo4j_password: str = "password"
     neo4j_database: str = "neo4j"
 
+    # ClickHouse settings
+    clickhouse_uri: str = "http://localhost:8123"
+    clickhouse_user: str = "default"
+    clickhouse_password: str = "password"
+    clickhouse_database: str = "default"
+
     # Pydantic v2 settings configuration: load .env and ignore unknown env vars
     model_config = SettingsConfigDict(
         env_file=".env",

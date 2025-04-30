@@ -83,11 +83,11 @@ class Neo4jInfoStore(InfoStore):
 
     async def find_similar_information(
         self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75
-    ) -> List[str]:
+    ) -> List[Dict[str, Any]]:
         """
         Retrieve related information values for the user's keywords.
         Matches Information nodes where key or value in keywords.
-        Returns phrases like "relationship value".
+        Returns full records: username, key, value, relationship, lifetime.
         """
         if not keywords:
             return []
@@ -106,10 +106,19 @@ class Neo4jInfoStore(InfoStore):
                 """
                 MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
                 WHERE i.value IN $keywords OR i.key IN $keywords
-                RETURN i.value AS value, r.relationship AS rel
+                RETURN u.username AS username, i.key AS key, i.value AS value, r.relationship AS relationship, r.lifetime AS lifetime
                 LIMIT $top_k
                 """,
                 {"username": username, "keywords": keywords, "top_k": top_k}
             )
             records = [rec async for rec in result]
-            return [f"{rec['rel']} {rec['value']}" for rec in records] 
+            return [
+                {
+                    "username": rec["username"],
+                    "key": rec["key"],
+                    "value": rec["value"],
+                    "relationship": rec["relationship"],
+                    "lifetime": rec["lifetime"],
+                }
+                for rec in records
+            ] 
