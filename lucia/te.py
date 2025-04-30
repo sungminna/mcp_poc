@@ -17,7 +17,7 @@ async def tes():
     vector_store = MilvusVectorStore()
     info_store = Neo4jInfoStore()
     pipeline = KnowledgePipeline(keyword_extractor=kw_extractor, embedding_client=embedding_client, vector_store=vector_store, info_extractor=info_extractor, info_store=info_store)
-    user_message = "i like cheesecake"
+    user_message = "my email is test@test.com"
     result = await pipeline.process(user_message, "test_user")
     print(result)
 

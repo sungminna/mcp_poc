@@ -41,17 +41,16 @@ Output:
 ```json
 {{
   "information": [
-    {{"key": "feline", "value": "cat", "relationship": "has", "lifetime": "permanent"}}
+    {{"key": "feline", "value": "cat", "relationship": "has", "lifetime": "long"}}
   ]
 }}
 ```
-Input: "I think running is better than swimming."
+Input: "My email is test@test.com"
 Output:
 ```json
 {{
   "information": [
-    {{"key": "exercise", "value": "running", "relationship": "prefers", "lifetime": "permanent"}},
-    {{"key": "exercise", "value": "swimming", "relationship": "prefers", "lifetime": "permanent"}}
+    {{"key": "email", "value": "test@test.com", "relationship": "has", "lifetime": "permanent"}}
   ]
 }}
 ```
