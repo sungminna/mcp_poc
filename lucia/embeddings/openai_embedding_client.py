@@ -86,5 +86,4 @@ class OpenAIEmbeddingClient(EmbeddingClient):
                         await self.redis_client.set(key, json.dumps(emb))
             for idx, emb in zip(indices_to_fetch, new_embeddings):
                 results[idx] = emb
-
         return results 

@@ -35,5 +35,4 @@ class OpenAIClient(LLMClient):
             input=input_list,
             text_format=output_format,
         )
-        # Return the raw JSON output
         return response.output_parsed
