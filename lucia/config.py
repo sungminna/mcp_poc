@@ -1,3 +1,7 @@
+"""
+Configuration module for Lucia project defining environment-based settings.
+Includes API keys and connection details for OpenAI, Redis, Milvus, Neo4j, and ClickHouse.
+"""
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
@@ -38,5 +42,5 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-# Instantiate settings for use across the package
+# Instantiate global settings object for access across the Lucia package
 settings = Settings() 

@@ -16,7 +16,11 @@ from lucia.pipelines.search_pipeline import SearchPipeline
 from lucia.embeddings.openai_embedding_client import OpenAIEmbeddingClient
 
 # PYTHONPATH=.. poetry run python agents/chitchat.py
+"""
+Module for the interactive ChitChat agent integrating personal info and keyword pipelines for context-aware dialogue.
+"""
 class ChitChatAgent:
+    """Conversational agent that maintains user context, uses pipelines, and streams LLM responses."""
     def __init__(self, name: str = "ChitChat", model: str = None, temperature: float = 0.7):
         os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
         self.model = model or settings.openai_model_name
@@ -38,6 +42,7 @@ class ChitChatAgent:
 
 
     async def run(self):
+        """Read user messages, enrich with personal context, stream LLM responses, and persist new info."""
         print("Chat agent initialized. Type your message (or empty input to quit).")
         while True:
             user_input = input("User: ")

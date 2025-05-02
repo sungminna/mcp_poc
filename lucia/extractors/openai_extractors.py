@@ -10,6 +10,10 @@ from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
+"""
+Module for OpenAI-based extractors for personal information and keywords.
+"""
+
 class OpenAIInfoExtractor(InfoExtractor):
     """Extract personal information using OpenAI Responses API and JSON parser."""
     def __init__(self, client: OpenAIClient = None):
@@ -34,6 +38,7 @@ class OpenAIKeywordExtractor(KeywordExtractor):
         self.client = client or OpenAIClient()
 
     async def extract(self, user_message: str) -> Dict[str, Any]:
+        """Send prompt to OpenAI for keyword extraction and parse response into ExtractedKeywordList."""
         system = keyword_extraction_system_prompt
         messages = [
             {"role": "system", "content": keyword_extraction_system_prompt},

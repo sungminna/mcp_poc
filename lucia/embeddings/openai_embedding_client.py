@@ -53,7 +53,7 @@ class OpenAIEmbeddingClient(EmbeddingClient):
         indices_to_fetch: List[int] = []
 
         if self.use_cache:
-            # Attempt to retrieve embeddings from cache
+            # Attempt to load embeddings from Redis for each text
             for idx, text in enumerate(texts):
                 key = self._cache_key(text)
                 cached = await self.redis_client.get(key)
@@ -69,7 +69,7 @@ class OpenAIEmbeddingClient(EmbeddingClient):
             texts_to_fetch = texts
             indices_to_fetch = list(range(len(texts)))
 
-        # Fetch embeddings from OpenAI for missing texts
+        # Fetch embeddings from OpenAI for any texts not found in cache
         if texts_to_fetch:
             response = self.client.embeddings.create(
                 model=self.model_name,
@@ -77,7 +77,7 @@ class OpenAIEmbeddingClient(EmbeddingClient):
             )
             new_embeddings = [data.embedding for data in response.data]
             if self.use_cache:
-                # Cache the new embeddings with optional TTL
+                # Store newly fetched embeddings in Redis with TTL if configured
                 for text, emb in zip(texts_to_fetch, new_embeddings):
                     key = self._cache_key(text)
                     if self.cache_ttl_seconds is not None:

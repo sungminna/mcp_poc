@@ -35,21 +35,24 @@ class KnowledgePipeline:
         username: str,
     ) -> Dict[str, Any]:
         """
-        Process a user message through the pipeline:
-        1) Extract personal info relationships and store in graph DB
-        2) Embed keywords and store in vector DB
+        Process a user message end-to-end by:
+          1) Extracting personal information and storing it in the graph database.
+          2) Extracting keywords, embedding them, and saving embeddings to the vector store.
 
-        Returns a dict with keys: 'keywords', 'vector_ids', 'info_list', 'relationships'.
+        Returns a result dict containing:
+          - info_list: list of extracted personal information items.
+          - vector_ids: IDs of inserted keyword embeddings in the vector store.
         """
         result: Dict[str, Any] = {}
 
 
 
         # 1. Personal info extraction and graph storage
-        info_list: List[Dict[str, Any]] = []
+        info_list: List[Dict[str, Any]] = []  # Holds extracted personal info dicts
         try:
             info_result = await self.info_extractor.extract(user_message)
             info_list = info_result.information
+            # Store extracted info in graph DB if present
             if info_list:
                 # Save personal information synchronously before returning
                 await self.info_store.save_personal_information(username, info_list)

@@ -1,5 +1,9 @@
 from typing import Any
 
+"""
+Module defining system prompts for personal information extraction, keyword extraction, and chitchat agent interactions.
+"""
+
 # Personal information extraction system prompt
 info_extraction_system_prompt = """
 # Role and Objective
