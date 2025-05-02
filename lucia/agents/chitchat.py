@@ -5,17 +5,37 @@ import os
 from lucia.config import settings
 from lucia.prompts import chitchat_agent_system_prompt
 
+
+from lucia.extractors.openai_extractors import OpenAIKeywordExtractor, OpenAIInfoExtractor
+from lucia.extractors.models import ExtractedKeywordList, ExtractedInfoList
+from lucia.clients.openai_client import OpenAIClient
+from lucia.vectorstores.milvus_vector_store import MilvusVectorStore
+from lucia.stores.info_store_neo4j import Neo4jInfoStore
+from lucia.pipelines.knowledge_pipeline import KnowledgePipeline
+from lucia.pipelines.search_pipeline import SearchPipeline
+from lucia.embeddings.openai_embedding_client import OpenAIEmbeddingClient
+
 # PYTHONPATH=.. poetry run python agents/chitchat.py
 class ChitChatAgent:
     def __init__(self, name: str = "ChitChat", model: str = None, temperature: float = 0.7):
         os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
-        self.model = model or settings.openai_model_name    
+        self.model = model or settings.openai_model_name
         self.agent = Agent(
             name=name,
             model=self.model,
             instructions=chitchat_agent_system_prompt
         )
         self.conversation = []
+
+        kw_extractor = OpenAIKeywordExtractor(client=OpenAIClient())
+        info_extractor = OpenAIInfoExtractor(client=OpenAIClient())
+        embedding_client = OpenAIEmbeddingClient(use_cache=True)
+        vector_store = MilvusVectorStore()
+        info_store = Neo4jInfoStore()
+
+        self.knowledge_pipeline = KnowledgePipeline(keyword_extractor=kw_extractor, embedding_client=embedding_client, vector_store=vector_store, info_extractor=info_extractor, info_store=info_store)
+        self.search_pipeline = SearchPipeline(keyword_extractor=kw_extractor, embedding_client=embedding_client, vector_store=vector_store, info_extractor=info_extractor, info_store=info_store)
+
 
     async def run(self):
         print("Chat agent initialized. Type your message (or empty input to quit).")
@@ -26,10 +46,19 @@ class ChitChatAgent:
                 break
             # Append user message to conversation history
             self.conversation.append({"role": "user", "content": user_input})
+            res = await self.search_pipeline.process(user_input, "test_user")
+            relationships = res['relationships']
+            print(res)
+            # Build structured context with personal information as a system message
+            info_content = (
+                "Here is some relevant personal information about the user which is might be relevant to the conversation:\n"
+                + "\n".join(f"- {rel}" for rel in relationships)
+            )
+            context = [{"role": "system", "content": info_content}] + self.conversation
             # Stream the agent response with configured temperature
             stream_result = Runner.run_streamed(
                 self.agent,
-                self.conversation,
+                context,
             )
             print("Bot: ", end="", flush=True)
             async for event in stream_result.stream_events():

@@ -85,7 +85,7 @@ class SearchPipeline:
                 result['info_list'] = info_list
                 # Derive human-readable relationship strings
                 result['relationships'] = [
-                    f"{rec['relationship']} {rec['value']}" for rec in info_list
+                    f"I(User) {rec.relationship} {rec.value} (a {rec.key}) for {rec.lifetime}, info inserted at {rec.inserted_at}." for rec in info_list
                 ]
                 logger.info(f"Found {len(info_list)} info records matching keywords.")
             else:

@@ -25,12 +25,10 @@ class MilvusVectorStore(VectorStore):
         self._port = settings.milvus_port
         self._alias = "default"
         self._collection: Optional[Collection] = None
-        self._connect_task = asyncio.create_task(self._connect_and_prepare())
-
-    async def _connect_and_prepare(self):
+        # perform synchronous connection and prepare the collection/index
         try:
             connections.connect(alias=self._alias, host=self._host, port=self._port)
-            await asyncio.to_thread(self._ensure_collection_and_index)
+            self._ensure_collection_and_index()
         except Exception as e:
             raise RuntimeError(f"Failed to connect or prepare Milvus: {e}")
 
@@ -52,7 +50,6 @@ class MilvusVectorStore(VectorStore):
                 self._collection.load()
 
     async def insert_vectors(self, data: List[Dict[str, Any]]) -> List[Any]:
-        await self._connect_task
         if not data:
             return []
         prepared_data = []
@@ -70,7 +67,6 @@ class MilvusVectorStore(VectorStore):
             raise RuntimeError(f"Failed to insert vectors: {e}")
 
     async def search_vectors(self, query_embeddings: List[List[float]], top_k: int = 5, similarity_threshold: float = 0.75) -> List[Dict[str, Any]]:
-        await self._connect_task
         if not query_embeddings:
             return []
         search_params = {
@@ -102,7 +98,6 @@ class MilvusVectorStore(VectorStore):
             raise RuntimeError(f"Failed to search vectors: {e}")
 
     async def get_vector_id_by_text(self, text: str) -> Optional[Any]:
-        await self._connect_task
         normalized_text = text.strip().lower() if text else ""
         if not normalized_text:
             return None

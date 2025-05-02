@@ -121,7 +121,7 @@ class ClickHouseInfoStore(InfoStore):
         # Build SQL for keyword matching
         kw_list = ','.join(f"'{kw}'" for kw in keywords)
         query = f"""
-            SELECT username, key, value, relationship, lifetime
+            SELECT username, key, value, relationship, lifetime, inserted_at
             FROM personal_information
             WHERE username = '{username}'
               AND (value IN ({kw_list}) OR key IN ({kw_list}))
@@ -142,6 +142,6 @@ class ClickHouseInfoStore(InfoStore):
 
         # Map rows to ExtractedInfo models
         return [
-            ExtractedInfo(username=u, key=k, value=v, relationship=rel, lifetime=lt)
-            for u, k, v, rel, lt in rows
+            ExtractedInfo(username=u, key=k, value=v, relationship=rel, lifetime=lt, inserted_at=ins)
+            for u, k, v, rel, lt, ins in rows
         ]

@@ -5,6 +5,7 @@ import asyncio
 import logging
 from ..config import settings
 from ..extractors.models import ExtractedInfo
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,8 @@ class Neo4jInfoStore(InfoStore):
         password = settings.neo4j_password
         self.driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
         self.database = database or settings.neo4j_database
-        # Ensure Information.value uniqueness constraint at startup
-        asyncio.create_task(self._ensure_value_uniqueness_constraint())
+        # track whether uniqueness constraint has been ensured
+        self._constraint_ensured: bool = False
 
     async def _ensure_value_uniqueness_constraint(self):
         """Ensure Information.value has a unique constraint in Neo4j"""
@@ -37,6 +38,10 @@ class Neo4jInfoStore(InfoStore):
         Save personal information as relationships in the graph.
         Each info dict must contain: key, value, relationship, lifetime.
         """
+        # ensure constraint only once before saving
+        if not self._constraint_ensured:
+            await self._ensure_value_uniqueness_constraint()
+            self._constraint_ensured = True
         async with self.driver.session(database=self.database) as session:
             # Ensure user node exists
             await session.run(
@@ -56,7 +61,7 @@ class Neo4jInfoStore(InfoStore):
                     SET i.key = $key
                     MERGE (u:User {username: $username})
                     MERGE (u)-[r:RELATES_TO {relationship: $rel}]->(i)
-                    SET r.lifetime = $lifetime
+                    SET r.lifetime = $lifetime, r.inserted_at = datetime()
                     """,
                     {
                         "username": username,
@@ -72,7 +77,7 @@ class Neo4jInfoStore(InfoStore):
                     MERGE (k:Information {key: "Attribute", value: $key})
                     MERGE (i:Information {key: $key, value: $value})
                     MERGE (i)-[h:HAS_ATTRIBUTE {relationship: $rel}]->(k)
-                    SET h.lifetome = $lifetime
+                    SET h.lifetome = $lifetime, h.inserted_at = datetime()
                     """,
                     {
                         "key": key,
@@ -107,20 +112,21 @@ class Neo4jInfoStore(InfoStore):
                 """
                 MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
                 WHERE i.value IN $keywords OR i.key IN $keywords
-                RETURN u.username AS username, i.key AS key, i.value AS value, r.relationship AS relationship, r.lifetime AS lifetime
+                RETURN u.username AS username, i.key AS key, i.value AS value, r.relationship AS relationship, r.lifetime AS lifetime, r.inserted_at AS inserted_at
                 LIMIT $top_k
                 """,
                 {"username": username, "keywords": keywords, "top_k": top_k}
             )
             records = [rec async for rec in result]
-            # Map each record to ExtractedInfo model
+            # Map each record to ExtractedInfo model including inserted_at
             return [
                 ExtractedInfo(
                     username=rec["username"],
                     key=rec["key"],
                     value=rec["value"],
                     relationship=rec["relationship"],
-                    lifetime=rec.get("lifetime") or rec.get("lifetime")
+                    lifetime=rec["lifetime"],
+                    inserted_at=rec.get("inserted_at")
                 )
                 for rec in records
             ] 
