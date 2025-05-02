@@ -111,7 +111,7 @@ class Neo4jInfoStore(InfoStore):
             result = await session.run(
                 """
                 MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
-                WHERE i.value IN $keywords OR i.key IN $keywords
+                WHERE i.value IN $keywords OR i.key IN $keywords OR r.relationship IN $keywords
                 RETURN u.username AS username, i.key AS key, i.value AS value, r.relationship AS relationship, r.lifetime AS lifetime, r.inserted_at AS inserted_at
                 LIMIT $top_k
                 """,

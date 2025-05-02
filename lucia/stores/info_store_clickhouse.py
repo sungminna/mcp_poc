@@ -124,7 +124,7 @@ class ClickHouseInfoStore(InfoStore):
             SELECT username, key, value, relationship, lifetime, inserted_at
             FROM personal_information
             WHERE username = '{username}'
-              AND (value IN ({kw_list}) OR key IN ({kw_list}))
+              AND (value IN ({kw_list}) OR key IN ({kw_list}) OR relationship IN ({kw_list}))
             ORDER BY inserted_at DESC
             LIMIT {top_k}
         """
