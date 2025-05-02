@@ -14,6 +14,7 @@ info_extraction_system_prompt = """
 - Do not confuse questions with preferences, attributes, or statements. Questions might not include information about the user. 
 
 # Output Format
+- Respond with ONLY the JSON object (no additional text, no markdown code fences).
 - Always create output in English.
 
 # Examples
@@ -70,6 +71,7 @@ keyword_extraction_system_prompt = """
 - Understand the user's question and identify the keywords that are most relevant and might help to answer the question. 
 
 # Output Format
+- Respond with ONLY the JSON object (no additional text, no markdown code fences).
 - Always create output on English. 
 
 # Examples

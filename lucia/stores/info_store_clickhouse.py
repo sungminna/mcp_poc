@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from datetime import datetime
 import clickhouse_connect
 from ..config import settings
-from ..extractors.models import ExtractedInfo
+from ..extractors.models import ExtractedInfoDBList
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class ClickHouseInfoStore(InfoStore):
             ORDER BY (username, inserted_at)
         """ )
 
-    async def save_personal_information(self, username: str, info_list: List[ExtractedInfo]):
+    async def save_personal_information(self, username: str, info_list: ExtractedInfoDBList):
         """
         Save personal information items for a user into ClickHouse.
         """
@@ -94,7 +94,7 @@ class ClickHouseInfoStore(InfoStore):
 
     async def find_similar_information(
         self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75
-    ) -> List[ExtractedInfo]:
+    ) -> ExtractedInfoDBList:
         """
         Retrieve related information items for a user based on keywords.
         Returns full records as ExtractedInfo models.

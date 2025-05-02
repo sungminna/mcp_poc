@@ -47,9 +47,7 @@ class ChitChatAgent:
             # Append user message to conversation history
             self.conversation.append({"role": "user", "content": user_input})
             res = await self.search_pipeline.process(user_input, "test_user")
-            relationships = res['relationships']
-            print(res)
-            # Build structured context with personal information as a system message
+            relationships = res['relationships']            # Build structured context with personal information as a system message
             info_content = (
                 "Here is some relevant personal information about the user which is might be relevant to the conversation:\n"
                 + "\n".join(f"- {rel}" for rel in relationships)
@@ -67,7 +65,7 @@ class ChitChatAgent:
             print()  # newline after complete response
             # Update history for next turn
             self.conversation = stream_result.to_input_list()
-
-
+            saved_res = await self.knowledge_pipeline.process(user_input, "test_user")
+            print(saved_res)
 if __name__ == "__main__":
     asyncio.run(ChitChatAgent().run())

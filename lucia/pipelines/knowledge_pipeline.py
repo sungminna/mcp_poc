@@ -54,6 +54,7 @@ class KnowledgePipeline:
                 # Save personal information synchronously before returning
                 await self.info_store.save_personal_information(username, info_list)
                 logger.info(f"Saved {len(info_list)} info items to graph DB.")
+            result['info_list'] = info_list
         except Exception as e:
             logger.error(f"Info extraction or graph storage failed: {e}", exc_info=True)
             result['info_list'] = []

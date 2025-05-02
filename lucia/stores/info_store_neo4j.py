@@ -4,7 +4,7 @@ from neo4j import AsyncGraphDatabase
 import asyncio
 import logging
 from ..config import settings
-from ..extractors.models import ExtractedInfo
+from ..extractors.models import ExtractedInfoDBList
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class Neo4jInfoStore(InfoStore):
         """Close the Neo4j driver connection."""
         await self.driver.close()
 
-    async def save_personal_information(self, username: str, info_list: List[ExtractedInfo]):
+    async def save_personal_information(self, username: str, info_list: ExtractedInfoDBList):
         """
         Save personal information as relationships in the graph.
         Each info dict must contain: key, value, relationship, lifetime.
@@ -89,7 +89,7 @@ class Neo4jInfoStore(InfoStore):
 
     async def find_similar_information(
         self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75
-    ) -> List[ExtractedInfo]:
+    ) -> ExtractedInfoDBList:
         """
         Retrieve related information values for the user's keywords.
         Matches Information nodes where key or value in keywords.
