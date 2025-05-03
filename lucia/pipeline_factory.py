@@ -54,7 +54,8 @@ def get_clickhouse_info_store() -> ClickHouseInfoStore:
 @lru_cache()
 def get_info_store() -> InfoStore:
     # Default to Neo4j info store (singleton)
-    return get_neo4j_info_store()
+    return get_clickhouse_info_store()
+    # return get_neo4j_info_store()
 
 @lru_cache()
 def get_knowledge_pipeline() -> KnowledgePipeline:
