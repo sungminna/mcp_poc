@@ -1,5 +1,6 @@
 from typing import Any, Dict, List
 import logging
+import time
 
 from ..extractors.extractor import KeywordExtractor, InfoExtractor
 from ..extractors.noop_extractor import NoOpKeywordExtractor, NoOpInfoExtractor
@@ -44,8 +45,7 @@ class KnowledgePipeline:
           - vector_ids: IDs of inserted keyword embeddings in the vector store.
         """
         result: Dict[str, Any] = {}
-
-
+        start_time = time.monotonic()
 
         # 1. Personal info extraction and graph storage
         info_list: List[Dict[str, Any]] = []  # Holds extracted personal info dicts
@@ -61,8 +61,13 @@ class KnowledgePipeline:
         except Exception as e:
             logger.error(f"Info extraction or graph storage failed: {e}", exc_info=True)
             result['info_list'] = []
+        info_end = time.monotonic()
+        logger.info(f"[KnowledgePipeline] info extraction+storage took {info_end - start_time:.3f}s")
+
         # 2. Embed keywords and store in vector DB
         vector_ids: List[Any] = []
+        embed_start = time.monotonic()
+        embed_api_start = time.monotonic()
         try:
             # Build keyword list from extracted info
             keywords: List[str] = []
@@ -70,12 +75,19 @@ class KnowledgePipeline:
                 keywords.extend([info.key, info.value, info.relationship])
             if keywords:
                 embeddings = await self.embedding_client.embed_text(keywords)
+                embed_api_end = time.monotonic()
+                logger.info(f"[KnowledgePipeline] embedding API call took {embed_api_end - embed_api_start:.3f}s")
+                print(f"[KnowledgePipeline] embedding API call took {embed_api_end - embed_api_start:.3f}s")
                 # Prepare data for vector store
                 data: List[Dict[str, Any]] = [
                     {"original_text": kw, "embedding": emb, "element_type": "keyword"}
                     for kw, emb in zip(keywords, embeddings)
                 ]
+                db_insert_start = time.monotonic()
                 vector_ids = await self.vector_store.insert_vectors(data)
+                db_insert_end = time.monotonic()
+                logger.info(f"[KnowledgePipeline] vector DB insert took {db_insert_end - db_insert_start:.3f}s")
+                print(f"[KnowledgePipeline] vector DB insert took {db_insert_end - db_insert_start:.3f}s")
                 result['vector_ids'] = vector_ids
                 logger.info(f"Inserted {len(vector_ids)} keyword vectors into vector store.")
             else:
@@ -83,5 +95,9 @@ class KnowledgePipeline:
         except Exception as e:
             logger.error(f"Embedding or vector insertion failed: {e}", exc_info=True)
             result['vector_ids'] = []
+        embed_end = time.monotonic()
+        logger.info(f"[KnowledgePipeline] embedding+insertion took {embed_end - embed_start:.3f}s")
+        total_end = time.monotonic()
+        logger.info(f"[KnowledgePipeline] total processing took {total_end - start_time:.3f}s")
 
         return result 

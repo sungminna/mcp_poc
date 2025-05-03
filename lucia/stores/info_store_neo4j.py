@@ -11,7 +11,18 @@ from neo4j.time import DateTime as Neo4jDateTime
 logger = logging.getLogger(__name__)
 
 class Neo4jInfoStore(InfoStore):
+    _instance = None
+    _initialized = False
+
+    def __new__(cls, database: str = None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self, database: str = None):
+        if type(self)._initialized:
+            return
+        type(self)._initialized = True
         """
         Initialize the Neo4j driver using centralized settings.
         """
@@ -49,43 +60,30 @@ class Neo4jInfoStore(InfoStore):
                 "MERGE (u:User {username: $username})",
                 {"username": username}
             )
-            for info in info_list:
-                # Support both dicts and objects with attributes (e.g., ExtractedInfo)
-                key = getattr(info, "key", None)
-                value = getattr(info, "value", None)
-                rel = getattr(info, "relationship", None)
-                lifetime = getattr(info, "lifetime", "permanent")
+            if info_list:
+                # Batch save all personal info using UNWIND to reduce network round trips
+                infos = [
+                    {
+                        "key": getattr(info, "key", None),
+                        "value": getattr(info, "value", None),
+                        "relationship": getattr(info, "relationship", None),
+                        "lifetime": getattr(info, "lifetime", "permanent")
+                    }
+                    for info in info_list
+                ]
                 await session.run(
                     """
-                    MERGE (i:Information {value: $value})
-                    // Update or set the key property on the Information node
-                    SET i.key = $key
+                    UNWIND $infos AS info
                     MERGE (u:User {username: $username})
-                    MERGE (u)-[r:RELATES_TO {relationship: $rel}]->(i)
-                    SET r.lifetime = $lifetime, r.inserted_at = datetime()
+                    MERGE (i:Information {value: info.value})
+                    SET i.key = info.key
+                    MERGE (u)-[r:RELATES_TO {relationship: info.relationship}]->(i)
+                    SET r.lifetime = info.lifetime, r.inserted_at = datetime()
+                    MERGE (k:Information {key: "Attribute", value: info.key})
+                    MERGE (i)-[h:HAS_ATTRIBUTE {relationship: "HAS_ATTRIBUTE"}]->(k)
+                    SET h.lifetime = "permanent", h.inserted_at = datetime()
                     """,
-                    {
-                        "username": username,
-                        "key": key,
-                        "value": value,
-                        "rel": rel,
-                        "lifetime": lifetime,
-                    }
-                )
-                # Also create an Attribute node for the key and connect it to the Information node
-                await session.run(
-                    """
-                    MERGE (k:Information {key: "Attribute", value: $key})
-                    MERGE (i:Information {key: $key, value: $value})
-                    MERGE (i)-[h:HAS_ATTRIBUTE {relationship: $rel}]->(k)
-                    SET h.lifetome = $lifetime, h.inserted_at = datetime()
-                    """,
-                    {
-                        "key": key,
-                        "value": value,
-                        "rel": "HAS_ATTRIBUTE",
-                        "lifetime": "permanent"
-                    }
+                    {"username": username, "infos": infos}
                 )
 
     async def find_similar_information(

@@ -6,6 +6,13 @@ from pymilvus import (
     connections, utility, Collection, CollectionSchema, FieldSchema, DataType, Index
 )
 from pymilvus.exceptions import MilvusException
+import time
+import logging
+import threading
+from queue import Queue
+import atexit
+
+logger = logging.getLogger(__name__)
 
 MILVUS_COLLECTION_NAME = "knowledge_vectors"
 MILVUS_VECTOR_FIELD = "embedding"
@@ -20,7 +27,19 @@ VECTOR_INDEX_PARAMS = {
 }
 
 class MilvusVectorStore(VectorStore):
+    _instance = None
+    _initialized = False
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
+        if type(self)._initialized:
+            return
+        type(self)._initialized = True
+        # Initialize host, port, alias, collection only once
         self._host = settings.milvus_host
         self._port = settings.milvus_port
         self._alias = "default"
@@ -31,6 +50,12 @@ class MilvusVectorStore(VectorStore):
             self._ensure_collection_and_index()
         except Exception as e:
             raise RuntimeError(f"Failed to connect or prepare Milvus: {e}")
+        # Start background flush worker
+        self._flush_queue = Queue()
+        t = threading.Thread(target=self._flush_worker, daemon=True)
+        t.start()
+        # Ensure pending flushes complete on process exit
+        atexit.register(self._shutdown)
 
     def _ensure_collection_and_index(self):
         if not utility.has_collection(MILVUS_COLLECTION_NAME, using=self._alias):
@@ -49,6 +74,32 @@ class MilvusVectorStore(VectorStore):
             if utility.load_state(MILVUS_COLLECTION_NAME) != "loaded":
                 self._collection.load()
 
+    def _flush_worker(self):
+        """
+        Background worker that flushes Milvus collection on demand.
+        """
+        while True:
+            # Wait for a flush signal
+            self._flush_queue.get()
+            try:
+                start = time.monotonic()
+                self._collection.flush()
+                duration = time.monotonic() - start
+                logger.info(f"[MilvusVectorStore worker] background flush took {duration:.3f}s")
+                print(f"[MilvusVectorStore worker] background flush took {duration:.3f}s")
+            except Exception as e:
+                logger.error(f"[MilvusVectorStore worker] background flush failed: {e}", exc_info=True)
+            finally:
+                self._flush_queue.task_done()
+
+    def _shutdown(self):
+        """
+        Wait for all pending flush tasks to complete before shutdown.
+        """
+        logger.info("[MilvusVectorStore] waiting for pending flush tasks to complete...")
+        self._flush_queue.join()
+        logger.info("[MilvusVectorStore] all pending flush tasks completed.")
+
     async def insert_vectors(self, data: List[Dict[str, Any]]) -> List[Any]:
         if not data:
             return []
@@ -60,8 +111,15 @@ class MilvusVectorStore(VectorStore):
                 MILVUS_TEXT_FIELD: item["original_text"].lower()
             })
         try:
+            # Profile insert; schedule background flush
+            insert_start = time.monotonic()
             result = await asyncio.to_thread(self._collection.insert, prepared_data)
-            await asyncio.to_thread(self._collection.flush)
+            insert_end = time.monotonic()
+            # Signal background flush
+            self._flush_queue.put(True)
+            duration = insert_end - insert_start
+            logger.info(f"[MilvusVectorStore] insert only took {duration:.3f}s (flush scheduled)")
+            print(f"[MilvusVectorStore] insert only took {duration:.3f}s (flush scheduled)")
             return result.primary_keys
         except Exception as e:
             raise RuntimeError(f"Failed to insert vectors: {e}")

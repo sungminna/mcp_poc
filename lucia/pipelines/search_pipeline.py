@@ -1,5 +1,6 @@
 from typing import Any, Dict, List
 import logging
+import time
 
 from ..extractors.extractor import KeywordExtractor, InfoExtractor
 from ..extractors.noop_extractor import NoOpKeywordExtractor, NoOpInfoExtractor
@@ -43,6 +44,7 @@ class SearchPipeline:
         Returns a dict with keys: 'keywords', 'vector_ids', 'info_list', 'relationships'.
         """
         result: Dict[str, Any] = {}
+        start_time = time.monotonic()
 
         # 1. Keyword extraction
         try:
@@ -54,29 +56,38 @@ class SearchPipeline:
             logger.error(f"Keyword extraction failed: {e}", exc_info=True)
             keywords = []
             result['keywords'] = []
-        # 2. Embedding and vector store insertion
+        kw_end = time.monotonic()
+        logger.info(f"[SearchPipeline] keyword extraction took {kw_end - start_time:.3f}s")
+        print(f"[SearchPipeline] keyword extraction took {kw_end - start_time:.3f}s")
+
+        # 2. Embed keywords and search vector store (no insertion)
         vector_ids: List[Any] = []
         if keywords:
+            embed_api_start = time.monotonic()
             try:
                 embeddings = await self.embedding_client.embed_text(keywords)
-                # Prepare data for vector store
-                data: List[Dict[str, Any]] = []
-                for kw, emb in zip(keywords, embeddings):
-                    data.append({
-                        "original_text": kw,
-                        "embedding": emb,
-                        "element_type": "keyword"
-                    })
-                vector_ids = await self.vector_store.insert_vectors(data)
-                result['vector_ids'] = vector_ids
-                logger.info(f"Inserted {len(vector_ids)} keyword vectors into vector store.")
+                embed_api_end = time.monotonic()
+                logger.info(f"[SearchPipeline] embedding API call took {embed_api_end - embed_api_start:.3f}s")
+                print(f"[SearchPipeline] embedding API call took {embed_api_end - embed_api_start:.3f}s")
+                # Search for similar embeddings in Milvus
+                sim_search_start = time.monotonic()
+                similar_hits = await self.vector_store.search_vectors(embeddings, top_k=5)
+                sim_search_end = time.monotonic()
+                logger.info(f"[SearchPipeline] similar keywords search took {sim_search_end - sim_search_start:.3f}s")
+                print(f"[SearchPipeline] similar keywords search took {sim_search_end - sim_search_start:.3f}s")
+                # Augment keyword list
+                similar_keywords = [hit['original_text'] for hit in similar_hits]
+                keywords.extend(similar_keywords)
+                result['keywords'] = keywords
+                result['vector_ids'] = []  # skipping insertion in this mode
             except Exception as e:
-                logger.error(f"Embedding or vector insertion failed: {e}", exc_info=True)
+                logger.error(f"Embedding or search failed: {e}", exc_info=True)
                 result['vector_ids'] = []
         else:
             result['vector_ids'] = []
 
         # 3. Personal info search from info storage
+        search_start = time.monotonic()
         info_list: List[Dict[str, Any]] = []
         try:
             if keywords and self.info_store:
@@ -95,5 +106,11 @@ class SearchPipeline:
             logger.error(f"Info search failed: {e}", exc_info=True)
             result['info_list'] = []
             result['relationships'] = []
+        search_end = time.monotonic()
+        logger.info(f"[SearchPipeline] info search took {search_end - search_start:.3f}s")
+        print(f"[SearchPipeline] info search took {search_end - search_start:.3f}s")
+        total_end = time.monotonic()
+        logger.info(f"[SearchPipeline] total processing took {total_end - start_time:.3f}s")
+        print(f"[SearchPipeline] total processing took {total_end - start_time:.3f}s")
 
         return result 

@@ -11,7 +11,18 @@ from ..extractors.models import ExtractedInfoDBList, ExtractedInfoDB
 logger = logging.getLogger(__name__)
 
 class ClickHouseInfoStore(InfoStore):
+    _instance = None
+    _initialized = False
+
+    def __new__(cls, database: str = None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self, database: str = None):
+        if type(self)._initialized:
+            return
+        type(self)._initialized = True
         """
         Initialize the ClickHouse client using centralized settings and ensure tables exist.
         """
@@ -58,39 +69,35 @@ class ClickHouseInfoStore(InfoStore):
             return
 
         loop = asyncio.get_event_loop()
-        # Insert user record (allows duplicates for simplicity)
-        try:
-            await loop.run_in_executor(
-                None,
-                self.client.insert,
-                'users',
-                ['username', 'created_at'],
-                [(username, datetime.utcnow())]
-            )
-        except Exception as e:
-            logger.debug(f"ClickHouseInfoStore: error inserting user: {e}")
+        now = datetime.utcnow()
+        # Build batch records
+        user_record = (username, now)
+        info_records = [
+            (username, info.key, info.value, info.relationship, info.lifetime or "permanent", now)
+            for info in info_list
+        ]
 
-        # Prepare batch records for personal information
-        records = []
-        for info in info_list:
-            # info is ExtractedInfo
-            key = info.key
-            value = info.value
-            rel = info.relationship
-            lifetime = info.lifetime or "permanent"
-            records.append((username, key, value, rel, lifetime, datetime.utcnow()))
+        # Schedule both inserts in a background thread to avoid blocking
+        def _insert_batch():
+            try:
+                self.client.insert(
+                    'users',
+                    ['username', 'created_at'],
+                    [user_record]
+                )
+            except Exception as e:
+                logger.debug(f"ClickHouseInfoStore: error inserting user: {e}")
+            try:
+                self.client.insert(
+                    'personal_information',
+                    ['username', 'key', 'value', 'relationship', 'lifetime', 'inserted_at'],
+                    info_records
+                )
+            except Exception as e:
+                logger.error(f"ClickHouseInfoStore: error inserting personal information: {e}")
 
-        # Insert personal information records
-        try:
-            await loop.run_in_executor(
-                None,
-                self.client.insert,
-                'personal_information',
-                ['username', 'key', 'value', 'relationship', 'lifetime', 'inserted_at'],
-                records
-            )
-        except Exception as e:
-            logger.error(f"ClickHouseInfoStore: error inserting personal information: {e}")
+        # fire-and-forget the batch insert
+        loop.run_in_executor(None, _insert_batch)
 
     async def find_similar_information(
         self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75
