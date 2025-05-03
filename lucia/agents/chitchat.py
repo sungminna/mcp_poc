@@ -5,15 +5,7 @@ import os
 from lucia.config import settings
 from lucia.prompts import chitchat_agent_system_prompt
 
-
-from lucia.extractors.openai_extractors import OpenAIKeywordExtractor, OpenAIInfoExtractor
-from lucia.extractors.models import ExtractedKeywordList, ExtractedInfoList
-from lucia.clients.openai_client import OpenAIClient
-from lucia.vectorstores.milvus_vector_store import MilvusVectorStore
-from lucia.stores.info_store_neo4j import Neo4jInfoStore
-from lucia.pipelines.knowledge_pipeline import KnowledgePipeline
-from lucia.pipelines.search_pipeline import SearchPipeline
-from lucia.embeddings.openai_embedding_client import OpenAIEmbeddingClient
+from lucia.pipeline_factory import get_knowledge_pipeline, get_search_pipeline
 
 # PYTHONPATH=.. poetry run python agents/chitchat.py
 """
@@ -31,15 +23,9 @@ class ChitChatAgent:
         )
         self.conversation = []
 
-        kw_extractor = OpenAIKeywordExtractor(client=OpenAIClient())
-        info_extractor = OpenAIInfoExtractor(client=OpenAIClient())
-        embedding_client = OpenAIEmbeddingClient(use_cache=True)
-        vector_store = MilvusVectorStore()
-        info_store = Neo4jInfoStore()
-
-        self.knowledge_pipeline = KnowledgePipeline(keyword_extractor=kw_extractor, embedding_client=embedding_client, vector_store=vector_store, info_extractor=info_extractor, info_store=info_store)
-        self.search_pipeline = SearchPipeline(keyword_extractor=kw_extractor, embedding_client=embedding_client, vector_store=vector_store, info_extractor=info_extractor, info_store=info_store)
-
+        # Use singleton pipelines from factory
+        self.knowledge_pipeline = get_knowledge_pipeline()
+        self.search_pipeline = get_search_pipeline()
 
     async def run(self):
         """Read user messages, enrich with personal context, stream LLM responses, and persist new info."""
@@ -53,6 +39,7 @@ class ChitChatAgent:
             self.conversation.append({"role": "user", "content": user_input})
             res = await self.search_pipeline.process(user_input, "test_user")
             relationships = res['relationships']            # Build structured context with personal information as a system message
+            print(res)
             info_content = (
                 "Here is some relevant personal information about the user which is might be relevant to the conversation:\n"
                 + "\n".join(f"- {rel}" for rel in relationships)

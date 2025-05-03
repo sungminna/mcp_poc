@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from datetime import datetime
 import clickhouse_connect
 from ..config import settings
-from ..extractors.models import ExtractedInfoDBList
+from ..extractors.models import ExtractedInfoDBList, ExtractedInfoDB
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,6 @@ class ClickHouseInfoStore(InfoStore):
 
         # Map rows to ExtractedInfo models
         return [
-            ExtractedInfo(username=u, key=k, value=v, relationship=rel, lifetime=lt, inserted_at=ins)
+            ExtractedInfoDB(username=u, key=k, value=v, relationship=rel, lifetime=lt, inserted_at=ins)
             for u, k, v, rel, lt, ins in rows
         ]

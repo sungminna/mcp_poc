@@ -4,8 +4,9 @@ from neo4j import AsyncGraphDatabase
 import asyncio
 import logging
 from ..config import settings
-from ..extractors.models import ExtractedInfoDBList
+from ..extractors.models import ExtractedInfoDBList, ExtractedInfoDB
 from datetime import datetime
+from neo4j.time import DateTime as Neo4jDateTime
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ class Neo4jInfoStore(InfoStore):
 
     async def find_similar_information(
         self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75
-    ) -> ExtractedInfoDBList:
+    ) -> List[ExtractedInfoDB]:
         """
         Retrieve related information values for the user's keywords.
         Matches Information nodes where key or value in keywords.
@@ -118,15 +119,19 @@ class Neo4jInfoStore(InfoStore):
                 {"username": username, "keywords": keywords, "top_k": top_k}
             )
             records = [rec async for rec in result]
-            # Map each record to ExtractedInfo model including inserted_at
-            return [
-                ExtractedInfo(
-                    username=rec["username"],
-                    key=rec["key"],
-                    value=rec["value"],
-                    relationship=rec["relationship"],
-                    lifetime=rec["lifetime"],
-                    inserted_at=rec.get("inserted_at")
-                )
-                for rec in records
-            ] 
+            items: List[ExtractedInfoDB] = []
+            for rec in records:
+                ts = rec.get("inserted_at")
+                if isinstance(ts, Neo4jDateTime):
+                    inserted_str = ts.to_native().isoformat()
+                else:
+                    inserted_str = str(ts) if ts is not None else None
+                items.append(ExtractedInfoDB(
+                    username=rec.get("username"),
+                    key=rec.get("key"),
+                    value=rec.get("value"),
+                    relationship=rec.get("relationship"),
+                    lifetime=rec.get("lifetime"),
+                    inserted_at=inserted_str
+                ))
+            return items 

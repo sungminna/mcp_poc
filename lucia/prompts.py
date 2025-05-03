@@ -12,14 +12,14 @@ info_extraction_system_prompt = """
 # Instructions
 - Analyze the user's message and identify any personal preferences, attributes, or statements.
 - The 'value' must be a noun or adjective, and **always in singular form** (e.g., 'cat' not 'cats', 'bike' not 'bikes').
-- The 'relationship' must be a verb describing the user's connection, **always in singular form** (e.g., 'likes', 'dislikes', 'is', 'has').
+- The 'relationship' must be a verb describing the user's connection, **always in first person singular form** (e.g., 'like', 'dislike', 'am', 'have').
 - The 'lifetime' must be a duration ('permanent', 'long', 'short') or an ISO 8601 datetime string.
 - The 'key' must be the **closest superordinate concept (immediate hypernym)** of the 'value'. It must be a noun or adjective representing the direct category the value belongs to. Avoid using relationship types or overly broad categories as the key.
 - Do not confuse questions with preferences, attributes, or statements. Questions might not include information about the user. 
 
 # Output Format
 - Respond with ONLY the JSON object (no additional text, no markdown code fences).
-- Always create output in English.
+- Always create output in **English**.
 
 # Examples
 Input: "I love pizza and hate broccoli."
@@ -27,8 +27,8 @@ Output:
 ```json
 {{
   "information": [
-    {{"key": "dish", "value": "pizza", "relationship": "likes", "lifetime": "permanent"}},
-    {{"key": "vegetable", "value": "broccoli", "relationship": "dislikes", "lifetime": "permanent"}}
+    {{"key": "dish", "value": "pizza", "relationship": "like", "lifetime": "permanent"}},
+    {{"key": "vegetable", "value": "broccoli", "relationship": "dislike", "lifetime": "permanent"}}
   ]
 }}
 ```
@@ -37,7 +37,7 @@ Output:
 ```json
 {{
   "information": [
-    {{"key": "color", "value": "blue", "relationship": "likes", "lifetime": "permanent"}}
+    {{"key": "color", "value": "blue", "relationship": "like", "lifetime": "permanent"}}
   ]
 }}
 ```
@@ -46,7 +46,7 @@ Output:
 ```json
 {{
   "information": [
-    {{"key": "feline", "value": "cat", "relationship": "has", "lifetime": "long"}}
+    {{"key": "feline", "value": "cat", "relationship": "have", "lifetime": "long"}}
   ]
 }}
 ```
@@ -55,7 +55,7 @@ Output:
 ```json
 {{
   "information": [
-    {{"key": "email", "value": "test@test.com", "relationship": "has", "lifetime": "permanent"}}
+    {{"key": "email", "value": "test@test.com", "relationship": "have", "lifetime": "permanent"}}
   ]
 }}
 ```
