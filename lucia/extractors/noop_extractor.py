@@ -1,3 +1,7 @@
+"""
+Provides No-Operation (NoOp) implementations of the extractor interfaces,
+returning empty results. Useful as defaults or for disabling extraction.
+"""
 from .extractor import InfoExtractor, KeywordExtractor
 from .models import ExtractedInfoList, ExtractedKeywordList
 

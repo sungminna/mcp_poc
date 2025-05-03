@@ -1,3 +1,9 @@
+"""
+Provides factory functions using lru_cache to create and retrieve singleton 
+instances of various components (clients, stores, extractors, pipelines) 
+used within the Lucia application. This ensures efficient resource management 
+by reusing component instances.
+"""
 from functools import lru_cache
 
 from .pipelines.knowledge_pipeline import KnowledgePipeline

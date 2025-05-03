@@ -1,3 +1,7 @@
+"""
+ClickHouse implementation of the InfoStore interface for storing and retrieving
+user information in a columnar database.
+"""
 from typing import List
 from .info_store import InfoStore
 import asyncio

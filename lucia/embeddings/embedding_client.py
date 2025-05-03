@@ -1,3 +1,6 @@
+"""
+Defines the abstract base class (interface) for text embedding clients.
+"""
 from abc import ABC, abstractmethod
 from typing import List
 

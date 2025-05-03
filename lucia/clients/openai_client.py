@@ -1,5 +1,9 @@
+"""
+OpenAI implementation of the LLMClient interface, using the OpenAI API
+to get structured (JSON/Pydantic) responses based on input messages.
+"""
 from typing import Type, List, Dict, Any
-from openai import OpenAI
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 from .llm_client import LLMClient
 from ..config import settings
@@ -15,22 +19,26 @@ class OpenAIClient(LLMClient):
         self.api_key = api_key or settings.openai_api_key
         if not self.api_key:
             raise ValueError("OpenAI API key must be provided via api_key parameter or environment variable.")
-        self.client = OpenAI(api_key=self.api_key)
+        self.client = AsyncOpenAI(api_key=self.api_key)
         self.model_name = model_name or settings.openai_model_name
 
     async def ask(
         self,
         input_list: List[Dict[str, str]],
         output_format: Type[BaseModel]
-    ) -> Dict[str, Any]:
+    ) -> BaseModel:
         """
-        Sends a series of messages to the LLM via the Responses API.
-        input_list: list of {'role': <role>, 'content': <text>} dicts.
-        output_format: Pydantic model class for downstream parsing.
-        Returns the raw JSON string output by the LLM.
+        Sends a series of messages to the LLM via the Responses API and returns a parsed Pydantic object.
+
+        Args:
+            input_list: list of {'role': <role>, 'content': <text>} dicts.
+            output_format: Pydantic model class defining the expected response structure.
+
+        Returns:
+            An instance of the output_format Pydantic model populated with the LLM's response.
         """
         # Use the last message content as the input
-        response = self.client.responses.parse(
+        response = await self.client.responses.parse(
             model=self.model_name,
             input=input_list,
             text_format=output_format,

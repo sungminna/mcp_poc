@@ -1,3 +1,7 @@
+"""
+Neo4j implementation of the InfoStore interface for storing and retrieving
+user information as graph relationships.
+"""
 from typing import List, Dict, Any
 from .info_store import InfoStore
 from neo4j import AsyncGraphDatabase

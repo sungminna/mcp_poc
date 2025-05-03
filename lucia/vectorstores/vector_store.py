@@ -1,3 +1,7 @@
+"""
+Defines the abstract base class (interface) for vector store operations,
+including insertion, search, and ID retrieval by text.
+"""
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 

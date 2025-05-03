@@ -1,3 +1,7 @@
+"""
+Defines the abstract base class (interface) for storing and retrieving 
+structured user information (ExtractedInfo).
+"""
 from abc import ABC, abstractmethod
 from typing import List
 from ..extractors.models import ExtractedInfo

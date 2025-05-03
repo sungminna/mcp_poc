@@ -1,3 +1,6 @@
+"""
+Defines abstract base classes (interfaces) for information and keyword extraction.
+"""
 from abc import ABC, abstractmethod
 from typing import List
 from .models import ExtractedInfoList, ExtractedKeywordList

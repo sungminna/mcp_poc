@@ -1,3 +1,4 @@
+"""Temporary test script for running the KnowledgePipeline."""
 import asyncio
 from lucia.pipeline_factory import get_knowledge_pipeline
 

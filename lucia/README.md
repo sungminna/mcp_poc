@@ -28,23 +28,29 @@ Key features:
 ---
 
 ## Prerequisites
-- Python 3.10 or later
+- Python >=3.13,<4.0 (as defined in `pyproject.toml`)
+- [Poetry](https://python-poetry.org/) for package management
 - A valid OpenAI API key
-- Docker (optional, for full-stack local deployment)
+- Docker and Docker Compose (optional, for full-stack local deployment of dependencies)
 
 ---
 
 ## Installation
+Make sure you have Poetry installed.
+
 ```bash
 # Clone the repo
-git clone https://github.com/your-org/LangGraph_proto.git
+git clone https://github.com/your-org/LangGraph_proto.git # Replace with the actual repo URL if different
 cd LangGraph_proto/lucia
 
-# Install dependencies via Poetry
+# Install dependencies and the lucia package in editable mode
 poetry install
 
-# Activate virtual environment
+# Activate the virtual environment managed by Poetry
 poetry shell
+# Now you can run python scripts directly, e.g., python te.py
+# Alternatively, without activating the shell, use 'poetry run':
+# poetry run python te.py
 ```
 
 Alternatively, use `pip`:
@@ -55,38 +61,41 @@ pip install .
 ---
 
 ## Configuration
-Create a `.env` file in the `lucia/` directory or set environment variables directly:
-```dotenv
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL_NAME=gpt-4.1-nano
-EMBEDDING_MODEL_NAME=text-embedding-3-small
+Create a `.env` file in the root of the `lucia/` directory (where `pyproject.toml` resides) or set environment variables directly. Lucia uses `pydantic-settings` to automatically load these.
 
-# Redis caching (optional)
-USE_REDIS_CACHE=true
+```dotenv
+# Required
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL_NAME=gpt-4.1-nano # Or another model like gpt-4o, gpt-4-turbo
+EMBEDDING_MODEL_NAME=text-embedding-3-small # Or another embedding model
+
+# Neo4j (Required by default InfoStore)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=password # Use the password set in docker-compose.yml or your Neo4j instance
+NEO4J_DATABASE=neo4j
+
+# Milvus (Required by default VectorStore)
+MILVUS_HOST=localhost
+MILVUS_PORT=19530
+
+# Redis Caching (Optional)
+# Set USE_REDIS_CACHE=true to enable
+USE_REDIS_CACHE=false
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_DB=0
-REDIS_PASSWORD=
-CACHE_TTL_SECONDS=86400
+REDIS_PASSWORD= # Set if your Redis requires a password
+CACHE_TTL_SECONDS=86400 # Optional: Cache time-to-live in seconds (default: None)
 
-# Neo4j
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=password
-NEO4J_DATABASE=neo4j
-
-# ClickHouse (optional)
+# ClickHouse InfoStore (Optional, if you implement/use it)
 CLICKHOUSE_URI=http://localhost:8123
 CLICKHOUSE_USER=default
-CLICKHOUSE_PASSWORD=password
+CLICKHOUSE_PASSWORD=password # Use the password set in docker-compose.yml or your ClickHouse instance
 CLICKHOUSE_DATABASE=default
+```
 
-# Milvus
-MILVUS_HOST=localhost
-MILVUS_PORT=19530
-```  
-
-Lucia will automatically load these settings via `pydantic`.
+Ensure the connection details match your running services (either local, Docker, or cloud-based).
 
 ---
 
@@ -175,28 +184,50 @@ if __name__ == "__main__":
 ---
 
 ## Interactive Scripts
-Lucia includes two demo scripts:
+Lucia includes two demo scripts that can be run using Poetry:
 
-- `te.py`: Simple end-to-end test
-- `agents/chitchat.py`: Interactive chat agent with persistence
+- `te.py`: Simple end-to-end test demonstrating pipeline usage.
+- `agents/chitchat.py`: Interactive chat agent that uses pipelines for knowledge persistence and retrieval.
 
 ```bash
-# Run the test script
-python te.py
+# Ensure your .env file is configured and dependencies (like Neo4j, Milvus) are running
 
-# Run the interactive chat agent
+# Option 1: Activate the virtual environment first
+poetry shell
+python te.py
 python agents/chitchat.py
+
+# Option 2: Use 'poetry run' directly
+poetry run python te.py
+poetry run python agents/chitchat.py
 ```
 
 ---
 
 ## Docker Compose
-Spin up local dependencies with Docker Compose:
+To easily run the required external dependencies (Neo4j, Milvus, Redis) locally, use the provided `docker-compose.yml` file.
 
 ```bash
+# Navigate to the lucia directory
+cd path/to/LangGraph_proto/lucia
+
+# Start all services in detached mode
 docker-compose up -d
+
+# Check the status of the containers (wait until health status is 'healthy')
+docker-compose ps
+
+# View logs for a specific service (e.g., milvus-standalone)
+docker-compose logs -f milvus-standalone_lucia
+
+# Access service UIs:
+# - Neo4j Browser: http://localhost:7474 (Use neo4j/password to login)
+# - Milvus Attu UI: http://localhost:7000
+
+# Stop and remove containers, networks, and volumes
+docker-compose down # Add -v to remove volumes as well
 ```
-This launches Redis, Neo4j, ClickHouse, and Milvus. Ensure the services are healthy before running Lucia.
+Ensure the services are healthy before running Lucia scripts that depend on them. The configuration in `.env` should match the ports and credentials defined in `docker-compose.yml`.
 
 ---
 
@@ -219,9 +250,27 @@ pipeline = KnowledgePipeline(..., vector_store=MyVectorStore(), ...)
 ---
 
 ## Development & Testing
-- Run linting: `flake8 lucia`
-- Run type checks: `mypy lucia`
-- Run tests (if added): `pytest`
+Use Poetry to manage the development environment and run tools.
+
+```bash
+# Activate environment
+poetry shell
+
+# Run linting (example using flake8, adjust if using ruff, black etc.)
+# Install development dependencies if needed: poetry install --with dev
+flake8 lucia
+
+# Run type checks (example using mypy)
+mypy lucia
+
+# Run tests (if configured with pytest)
+pytest
+
+# Alternatively, run commands directly with 'poetry run'
+poetry run flake8 lucia
+poetry run mypy lucia
+poetry run pytest
+```
 
 ---
 
