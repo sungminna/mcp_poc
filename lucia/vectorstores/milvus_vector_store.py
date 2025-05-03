@@ -6,7 +6,6 @@ from pymilvus import (
     connections, utility, Collection, CollectionSchema, FieldSchema, DataType, Index
 )
 from pymilvus.exceptions import MilvusException
-import time
 import logging
 import threading
 from queue import Queue
@@ -82,11 +81,7 @@ class MilvusVectorStore(VectorStore):
             # Wait for a flush signal
             self._flush_queue.get()
             try:
-                start = time.monotonic()
                 self._collection.flush()
-                duration = time.monotonic() - start
-                logger.info(f"[MilvusVectorStore worker] background flush took {duration:.3f}s")
-                print(f"[MilvusVectorStore worker] background flush took {duration:.3f}s")
             except Exception as e:
                 logger.error(f"[MilvusVectorStore worker] background flush failed: {e}", exc_info=True)
             finally:
@@ -112,14 +107,9 @@ class MilvusVectorStore(VectorStore):
             })
         try:
             # Profile insert; schedule background flush
-            insert_start = time.monotonic()
             result = await asyncio.to_thread(self._collection.insert, prepared_data)
-            insert_end = time.monotonic()
             # Signal background flush
             self._flush_queue.put(True)
-            duration = insert_end - insert_start
-            logger.info(f"[MilvusVectorStore] insert only took {duration:.3f}s (flush scheduled)")
-            print(f"[MilvusVectorStore] insert only took {duration:.3f}s (flush scheduled)")
             return result.primary_keys
         except Exception as e:
             raise RuntimeError(f"Failed to insert vectors: {e}")
