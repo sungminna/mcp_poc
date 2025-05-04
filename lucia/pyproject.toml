@@ -1,5 +1,5 @@
 [project]
-name = "lucia"
+name = "delos-lucia"
 version = "0.1.0"
 description = "A modular Python library for personal AI Agent. Information extraction, keyword extraction, embeddings generation (via OpenAI), and storage in graph (Neo4j) and vector (Milvus) databases, with support for Redis caching and pluggable components."
 authors = [
@@ -34,7 +34,7 @@ dependencies = [
 
 
 packages = [
-    { include = "lucia", from = "src", exclude = ["clickhouse", "volumes"] }
+    { include = "delos_lucia", from = "src", exclude = ["clickhouse", "volumes"] }
 ]
 
 [build-system]
