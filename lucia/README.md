@@ -1,5 +1,7 @@
 # Lucia AI Toolkit
 
+[![PyPI version](https://badge.fury.io/py/delos-lucia.svg)](https://badge.fury.io/py/delos-lucia)
+
 A modular Python library for personal information extraction, keyword extraction, embeddings, and storage in graph and vector databases.
 
 Key features:
@@ -36,7 +38,13 @@ Key features:
 ---
 
 ## Installation
-Make sure you have Poetry installed.
+You can install Lucia directly from PyPI:
+
+```bash
+pip install delos-lucia
+```
+
+Alternatively, for development or contribution, use Poetry:
 
 ```bash
 # Clone the repo
