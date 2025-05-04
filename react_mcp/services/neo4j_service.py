@@ -382,24 +382,17 @@ class Neo4jService:
                 # Step 2c: Key Node & Hierarchy
                 key_node_key_prop = "Category"
                 key_node_params = {"key_node_key": key_node_key_prop, "key_value": key_str}
-                neo4j_key_node_id = None
-                try:
-                    # 1. 기존 카테고리 노드가 있는지 확인
-                    find_key_node_query = (
-                        "MATCH (k:Information {key: $key_node_key, value: $key_value}) RETURN elementId(k) AS key_node_id"
-                    )
-                    key_node = await _async_fetch_single(driver, find_key_node_query, key_node_params)
-                    if key_node:
-                        neo4j_key_node_id = key_node["key_node_id"]
-                    else:
-                        # 없으면 새로 생성
-                        create_key_node_query = (
-                            "CREATE (k:Information {key: $key_node_key, value: $key_value, createdAt: timestamp(), children: []}) RETURN elementId(k)"
-                        )
-                        neo4j_key_node_id = await _async_create_node_get_id(driver, create_key_node_query, key_node_params)
-                        if neo4j_key_node_id is None: raise ValueError(f"Failed to create/get key node ID for {key_str}")
-                except Exception as e:
-                    logger.error(f"Error checking/creating key node for key='{key_str}': {e}", exc_info=True)
+                # Merge Category node by value to respect unique constraint on value
+                merge_key_node_query = (
+                    "MERGE (k:Information {value: $key_value}) "
+                    "ON CREATE SET k.key = $key_node_key, k.createdAt = timestamp(), k.children = [] "
+                    "ON MATCH SET k.key = $key_node_key, k.updatedAt = timestamp() "
+                    "RETURN elementId(k) AS key_node_id"
+                )
+                record = await _async_fetch_single(driver, merge_key_node_query, key_node_params)
+                neo4j_key_node_id = record["key_node_id"] if record else None
+                if neo4j_key_node_id is None:
+                    logger.error(f"Failed to merge key node ID for key='{key_str}'")
                     continue
                 
                 create_hierarchy_rel_query = (
@@ -523,15 +516,33 @@ class Neo4jService:
                 query1 = """
                 MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
                 WHERE r.value IN $texts OR i.value IN $texts
-                RETURN 
-                    elementId(r) AS rel_id, 
-                    r.value AS relationship, 
-                    i.key AS node_key, 
-                    i.value AS node_value, 
-                    i.createdAt AS created_at, 
+                RETURN
+                    elementId(r) AS rel_id,
+                    r.value AS relationship,
+                    i.key AS node_key,
+                    i.value AS node_value,
+                    i.createdAt AS created_at,
                     r.lifetime AS lifetime,
-                    i.children AS children // Get children list
-                ORDER BY i.createdAt DESC
+                    i.children AS children
+                    , '' AS parent_relationship
+                    , '' AS parent_value
+
+                UNION ALL
+
+                MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)-[h:HAS_CATEGORY]->(j:Information)
+                WHERE (r.value IN $texts OR i.value IN $texts) AND NOT j:User
+                RETURN
+                    elementId(h) AS rel_id,
+                    type(h) AS relationship,
+                    j.key AS node_key,
+                    j.value AS node_value,
+                    j.createdAt AS created_at,
+                    '' AS lifetime,
+                    j.children AS children,
+                    r.value AS parent_relationship,
+                    i.value AS parent_value
+
+                ORDER BY created_at DESC
                 LIMIT $limit
                 """
                 query1_results = await _async_fetch_list(driver, query1,
@@ -555,35 +566,32 @@ class Neo4jService:
                 logger.error(f"Error in Neo4j Query 1 for user '{username}': {e}", exc_info=True)
                 # Continue without initial results if query fails?
 
-        # 4. Neo4j Query 2: Find nodes based on child keywords
+        # 4. Neo4j Query 2: Find child concepts via HAS_CATEGORY from user's nodes
         child_neo4j_data = []
-        if child_keywords:
-            try:
-                # Query to find nodes connected to the user matching child keywords
-                query2 = """
-                MATCH (u:User {username: $username})-[r:RELATES_TO]->(i:Information)
-                WHERE i.value IN $child_keywords // Match node value against children
-                RETURN 
-                    elementId(r) AS rel_id, 
-                    r.value AS relationship, 
-                    i.key AS node_key, 
-                    i.value AS node_value, 
-                    i.createdAt AS created_at, 
-                    r.lifetime AS lifetime
-                    // No need to return i.children here
-                ORDER BY i.createdAt DESC
-                LIMIT $limit
-                """
-                query2_results = await _async_fetch_list(driver, query2,
-                    params={"username": username, "child_keywords": list(child_keywords), "limit": top_k * 3}
-                )
-                if query2_results:
-                    child_neo4j_data.extend(query2_results)
-                    logger.info(f"Query 2 found {len(child_neo4j_data)} nodes/rels matching child keywords.")
-                else:
-                     logger.info(f"Query 2 found no nodes/rels matching child keywords for user '{username}'.")
-            except Exception as e:
-                logger.error(f"Error in Neo4j Query 2 (children) for user '{username}': {e}", exc_info=True)
+        try:
+            # Query 2: Find child concepts via HAS_CATEGORY from user's nodes
+            query2 = """
+            MATCH (u:User {username: $username})-[r:RELATES_TO]->(parent:Information)-[h:HAS_CATEGORY]->(child:Information)
+            RETURN
+                elementId(h) AS rel_id,
+                type(h) AS relationship,
+                child.key AS node_key,
+                child.value AS node_value,
+                child.createdAt AS created_at,
+                '' AS lifetime
+            ORDER BY child.createdAt DESC
+            LIMIT $limit
+            """
+            query2_results = await _async_fetch_list(driver, query2,
+                params={"username": username, "limit": top_k * 3}
+            )
+            if query2_results:
+                child_neo4j_data.extend(query2_results)
+                logger.info(f"Query 2 found {len(child_neo4j_data)} direct child nodes for user '{username}'.")
+            else:
+                logger.info(f"Query 2 found no direct child nodes for user '{username}'.")
+        except Exception as e:
+            logger.error(f"Error in Neo4j Query 2 (direct children) for user '{username}': {e}", exc_info=True)
 
         # 5. Neo4j Query 3: Find edges that contain similar information
         edge_neo4j_data = []
@@ -647,6 +655,37 @@ class Neo4jService:
             if len(output_sentences) >= top_k:
                 break
 
+            # 2-hop chain handling: if parent info present, emit two sentences
+            parent_rel = record_dict.get('parent_relationship')
+            parent_val = record_dict.get('parent_value')
+            # timestamp and lifetime
+            created_at = record_dict.get("created_at")
+            if isinstance(created_at, (int, float)):
+                try: created_iso = datetime.fromtimestamp(created_at / 1000).isoformat()
+                except Exception: created_iso = str(created_at)
+            else: created_iso = str(created_at)
+            lifetime = record_dict.get("lifetime", "")
+            if parent_rel and parent_val:
+                pr = parent_rel.lower()
+                pv = parent_val.lower()
+                # Sentence 1: user->parent
+                sent1 = (
+                    f"You {pr} {pv}, "
+                    f"recorded around {created_iso}, lifetime {lifetime}."
+                )
+                sent1 = sent1[0].upper() + sent1[1:]
+                output_sentences.append(sent1)
+                if len(output_sentences) >= top_k:
+                    break
+                # Sentence 2: parent->child category
+                key = record_dict.get('node_key', '').lower()
+                cv = record_dict.get('node_value', '').lower()
+                sent2 = f"{pv.capitalize()} is a {key} of {cv}."
+                output_sentences.append(sent2)
+                if len(output_sentences) >= top_k:
+                    break
+                continue
+            # default one-sentence generation
             rel_verb = record_dict.get('relationship', '').lower()
             node_val = record_dict.get('node_value', '').lower()
             node_key = record_dict.get('node_key', '').lower()
