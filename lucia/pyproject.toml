@@ -1,6 +1,6 @@
 [project]
 name = "delos-lucia"
-version = "0.1.0"
+version = "0.1.1"
 description = "A modular Python library for personal AI Agent. Information extraction, keyword extraction, embeddings generation (via OpenAI), and storage in graph (Neo4j) and vector (Milvus) databases, with support for Redis caching and pluggable components."
 authors = [
     {name = "sungminna",email = "sungmin.na330@gmail.com"}
