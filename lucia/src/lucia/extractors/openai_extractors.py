@@ -10,40 +10,55 @@ from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
-"""
-Module for OpenAI-based extractors for personal information and keywords.
+"""OpenAI-based extractor implementations module.
+
+Provides classes for personal information and keyword extraction using the OpenAI Responses API.
 """
 
 class OpenAIInfoExtractor(InfoExtractor):
-    """Extract personal information using OpenAI Responses API and JSON parser."""
+    """Extractor that identifies personal information from user messages via OpenAI."""
     def __init__(self, client: OpenAIClient = None):
+        """Initialize with an OpenAI client instance."""
         self.client = client or OpenAIClient()
 
     async def extract(self, user_message: str) -> ExtractedInfoList:
+        """
+        Send a prompt to OpenAI to extract personal information.
+
+        Args:
+            user_message (str): The input message from the user.
+
+        Returns:
+            ExtractedInfoList: Parsed personal information items, empty list on error.
+        """
         messages = [
             {"role": "system", "content": info_extraction_system_prompt},
             {"role": "user", "content": user_message},
         ]
         try:
-            info_list_model = await self.client.ask(input_list=messages, output_format=ExtractedInfoList)
-            return info_list_model
+            return await self.client.ask(input_list=messages, output_format=ExtractedInfoList)
         except ValidationError as e:
-            logger.error(f"OpenAIInfoExtractor: JSON parsing failed: {e}", exc_info=True)
-            # Return an empty information list on parse failure
+            logger.error(f"JSON parsing failed in OpenAIInfoExtractor: {e}", exc_info=True)
             return ExtractedInfoList(information=[])
 
 class OpenAIKeywordExtractor(KeywordExtractor):
-    """Extract keywords using OpenAI Responses API."""
+    """Extractor that identifies keywords from user messages via OpenAI."""
     def __init__(self, client: OpenAIClient = None):
+        """Initialize with an OpenAI client instance."""
         self.client = client or OpenAIClient()
 
     async def extract(self, user_message: str) -> Dict[str, Any]:
-        """Send prompt to OpenAI for keyword extraction and parse response into ExtractedKeywordList."""
-        system = keyword_extraction_system_prompt
+        """
+        Send a prompt to OpenAI to extract keywords.
+
+        Args:
+            user_message (str): The input message from the user.
+
+        Returns:
+            ExtractedKeywordList: Parsed list of keywords.
+        """
         messages = [
             {"role": "system", "content": keyword_extraction_system_prompt},
             {"role": "user", "content": user_message},
         ]
-        json = await self.client.ask(input_list=messages, output_format=ExtractedKeywordList)
-        
-        return json
+        return await self.client.ask(input_list=messages, output_format=ExtractedKeywordList)

@@ -1,6 +1,6 @@
 """
-OpenAI implementation of the LLMClient interface, using the OpenAI API
-to get structured (JSON/Pydantic) responses based on input messages.
+OpenAIClient implementation using the AsyncOpenAI Responses API.
+Sends message lists to the model and parses outputs into Pydantic models.
 """
 from typing import Type, List, Dict, Any
 from openai import AsyncOpenAI
@@ -12,9 +12,13 @@ from ..config import settings
 class OpenAIClient(LLMClient):
     def __init__(self, api_key: str = None, model_name: str = None):
         """
-        Initialize AsyncOpenAI client for the Responses API.
-        If api_key is not provided, reads from settings.openai_api_key.
-        model_name should be a text model supporting the Responses API.
+        Initialize the OpenAI client for structured response parsing.
+
+        Args:
+            api_key (str, optional): OpenAI API key (overrides environment setting).
+            model_name (str, optional): Model name for the Responses API.
+        Raises:
+            ValueError: If no API key is provided or configured.
         """
         self.api_key = api_key or settings.openai_api_key
         if not self.api_key:
@@ -28,14 +32,14 @@ class OpenAIClient(LLMClient):
         output_format: Type[BaseModel]
     ) -> BaseModel:
         """
-        Sends a series of messages to the LLM via the Responses API and returns a parsed Pydantic object.
+        Send messages to the model and parse the JSON output into a Pydantic model.
 
         Args:
-            input_list: list of {'role': <role>, 'content': <text>} dicts.
-            output_format: Pydantic model class defining the expected response structure.
+            input_list (List[Dict[str, str]]): Sequence of role/content message dicts.
+            output_format (Type[BaseModel]): Pydantic model class for response parsing.
 
         Returns:
-            An instance of the output_format Pydantic model populated with the LLM's response.
+            BaseModel: Parsed response instance.
         """
         # Use the last message content as the input
         response = await self.client.responses.parse(

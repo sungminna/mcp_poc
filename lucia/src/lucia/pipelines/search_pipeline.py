@@ -1,3 +1,9 @@
+"""SearchPipeline module.
+
+Implements a pipeline to extract keywords, perform vector similarity searches,
+and retrieve user-specific information from the info store.
+"""
+
 from typing import Any, Dict, List
 import logging
 
@@ -10,10 +16,8 @@ from ..stores.info_store import InfoStore
 logger = logging.getLogger(__name__)
 
 class SearchPipeline:
-    """
-    Pipeline for extracting keywords, embedding them into a vector DB,
-    and searching for personal info relations to store in a graph DB.
-    """
+    """Pipeline for keyword extraction, vector search, and personal info retrieval."""
+
     def __init__(
         self,
         keyword_extractor: KeywordExtractor = None,
@@ -22,6 +26,15 @@ class SearchPipeline:
         info_extractor: InfoExtractor = None,
         info_store: InfoStore = None,
     ):
+        """Initialize the search pipeline with provided components or default no-op extractors.
+
+        Args:
+            keyword_extractor (KeywordExtractor, optional): Service to extract keywords.
+            embedding_client (EmbeddingClient): Service to generate embeddings.
+            vector_store (VectorStore): Backend for vector operations.
+            info_extractor (InfoExtractor, optional): Service to extract personal info.
+            info_store (InfoStore, optional): Backend for personal info storage.
+        """
         # Use no-op extractors if none provided
         self.keyword_extractor = keyword_extractor or NoOpKeywordExtractor()
         self.embedding_client = embedding_client
@@ -34,17 +47,28 @@ class SearchPipeline:
         user_message: str,
         username: str,
     ) -> Dict[str, Any]:
-        """
-        Process a user message through the pipeline:
-        1) Extract keywords
-        2) Embed keywords and store in vector DB
-        3) Extract personal info relationships and store in graph DB
+        """Run the search pipeline on a user message.
 
-        Returns a dict with keys: 'keywords', 'vector_ids', 'info_list', 'relationships'.
+        Steps:
+            1. Extract keywords.
+            2. Embed keywords and perform vector similarity search.
+            3. Retrieve matching personal info entries.
+
+        Args:
+            user_message (str): The user's input text.
+            username (str): Identifier for the user context.
+
+        Returns:
+            Dict[str, Any]: {
+                'keywords': List[str],
+                'vector_ids': List[Any],
+                'info_list': List[ExtractedInfo],
+                'relationships': List[str]
+            }
         """
         result: Dict[str, Any] = {}
 
-        # 1. Keyword extraction
+        # Step 1: Extract keywords
         try:
             keywords_result = await self.keyword_extractor.extract(user_message)
             keywords = keywords_result.keywords
@@ -54,14 +78,14 @@ class SearchPipeline:
             keywords = []
             result['keywords'] = []
 
-        # 2. Embed keywords and search vector store (no insertion)
+        # Step 2: Embed keywords and perform vector similarity search
         vector_ids: List[Any] = []
         if keywords:
             try:
                 embeddings = await self.embedding_client.embed_text(keywords)
-                # Search for similar embeddings in Milvus
+                # Retrieve similar vectors from the vector store
                 similar_hits = await self.vector_store.search_vectors(embeddings, top_k=5)
-                # Augment keyword list
+                # Append similar texts to the keyword list
                 similar_keywords = [hit['original_text'] for hit in similar_hits]
                 keywords.extend(similar_keywords)
                 result['keywords'] = keywords
@@ -72,14 +96,14 @@ class SearchPipeline:
         else:
             result['vector_ids'] = []
 
-        # 3. Personal info search from info storage
+        # Step 3: Retrieve personal information matching keywords
         info_list: List[Dict[str, Any]] = []
         try:
             if keywords and self.info_store:
-                # Retrieve full info records matching keywords
+                # Fetch matching records from the info store
                 info_list = await self.info_store.find_similar_information(username, keywords)
                 result['info_list'] = info_list
-                # Derive human-readable relationship strings
+                # Construct human-readable relationship descriptions
                 result['relationships'] = [
                     f"I(User) {rec.relationship} {rec.value} (a {rec.key}) for {rec.lifetime}, info inserted at {rec.inserted_at}." for rec in info_list
                 ]

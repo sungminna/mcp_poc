@@ -1,6 +1,8 @@
 """
-ClickHouse implementation of the InfoStore interface for storing and retrieving
-user information in a columnar database.
+ClickHouseInfoStore module.
+
+Implements the InfoStore interface for persisting user information in ClickHouse.
+Supports saving personal info and retrieving records based on keyword queries.
 """
 from typing import List
 from .info_store import InfoStore
@@ -28,7 +30,10 @@ class ClickHouseInfoStore(InfoStore):
             return
         type(self)._initialized = True
         """
-        Initialize the ClickHouse client using centralized settings and ensure tables exist.
+        Initialize the ClickHouse client and ensure required tables exist.
+
+        Args:
+            database (str, optional): ClickHouse database name (overrides default).
         """
         # Parse the ClickHouse URI for host, port, and scheme
         parsed = urlparse(settings.clickhouse_uri)
@@ -67,7 +72,11 @@ class ClickHouseInfoStore(InfoStore):
 
     async def save_personal_information(self, username: str, info_list: ExtractedInfoDBList):
         """
-        Save personal information items for a user into ClickHouse.
+        Persist personal information records for a user.
+
+        Args:
+            username (str): Unique identifier of the user.
+            info_list (ExtractedInfoDBList): Collection of ExtractedInfoDB entries.
         """
         if not info_list:
             return
@@ -116,8 +125,16 @@ class ClickHouseInfoStore(InfoStore):
         self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75
     ) -> ExtractedInfoDBList:
         """
-        Retrieve related information items for a user based on keywords.
-        Returns full records as ExtractedInfo models.
+        Query ClickHouse for records matching user keywords.
+
+        Args:
+            username (str): User identifier to filter records.
+            keywords (List[str]): Keywords to match against key, value, or relationship.
+            top_k (int): Maximum number of records to return.
+            similarity_threshold (float): Unused threshold parameter (for interface compatibility).
+
+        Returns:
+            ExtractedInfoDBList: List of matching info records, empty if none found.
         """
         if not keywords:
             return []
