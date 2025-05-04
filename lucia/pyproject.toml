@@ -1,12 +1,25 @@
 [project]
 name = "lucia"
 version = "0.1.0"
-description = ""
+description = "A modular Python library for personal AI Agent. Information extraction, keyword extraction, embeddings generation (via OpenAI), and storage in graph (Neo4j) and vector (Milvus) databases, with support for Redis caching and pluggable components."
 authors = [
     {name = "sungminna",email = "sungmin.na330@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.13,<4.0"
+license = { text = "Apache-2.0" }
+keywords = ["ai", "llm", "nlp", "information extraction", "keyword extraction", "embedding", "vector database", "graph database", "neo4j", "milvus", "openai", "pipeline", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha", # Assuming Alpha stage
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+urls = { Homepage = "https://my.surfit.io/w/528136765", Repository = "https://github.com/sungminna/mcp_poc/tree/main/lucia" }
 dependencies = [
     "openai (>=1.77.0,<2.0.0)",
     "pydantic (>=2.11.4,<3.0.0)",
@@ -17,12 +30,11 @@ dependencies = [
     "pydantic-settings (>=2.9.1,<3.0.0)",
     "clickhouse-connect (>=0.8.17,<0.9.0)",
     "openai-agents (>=0.0.14,<0.0.15)"
-
 ]
 
 
 packages = [
-    { include = "lucia", from = "src" }
+    { include = "lucia" }
 ]
 
 [build-system]
