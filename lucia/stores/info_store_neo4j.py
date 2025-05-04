@@ -1,6 +1,8 @@
 """
-Neo4j implementation of the InfoStore interface for storing and retrieving
-user information as graph relationships.
+Neo4jInfoStore module.
+
+Implements the InfoStore interface using Neo4j for graph-based storage
+and retrieval of user personal information as nodes and relationships.
 """
 from typing import List, Dict, Any
 from .info_store import InfoStore
@@ -28,7 +30,10 @@ class Neo4jInfoStore(InfoStore):
             return
         type(self)._initialized = True
         """
-        Initialize the Neo4j driver using centralized settings.
+        Initialize the Neo4j driver and select the target database.
+
+        Args:
+            database (str, optional): Database name override; defaults to configured setting.
         """
         uri = settings.neo4j_uri
         user = settings.neo4j_user
@@ -39,22 +44,25 @@ class Neo4jInfoStore(InfoStore):
         self._constraint_ensured: bool = False
 
     async def _ensure_value_uniqueness_constraint(self):
-        """Ensure Information.value has a unique constraint in Neo4j"""
+        """Ensure a uniqueness constraint on Information.value node property."""
         async with self.driver.session(database=self.database) as session:
             await session.run(
                 """CREATE CONSTRAINT IF NOT EXISTS FOR (i:Information) REQUIRE i.value IS UNIQUE"""
             )
 
     async def close(self):
-        """Close the Neo4j driver connection."""
+        """Close the Neo4j driver connection gracefully."""
         await self.driver.close()
 
     async def save_personal_information(self, username: str, info_list: ExtractedInfoDBList):
         """
-        Save personal information as relationships in the graph.
-        Each info dict must contain: key, value, relationship, lifetime.
+        Persist personal information entries as graph relationships in Neo4j.
+
+        Args:
+            username (str): Unique identifier for the user node.
+            info_list (ExtractedInfoDBList): List of user info entries to save.
         """
-        # ensure constraint only once before saving
+        # Apply uniqueness constraint once per instance
         if not self._constraint_ensured:
             await self._ensure_value_uniqueness_constraint()
             self._constraint_ensured = True
@@ -94,9 +102,16 @@ class Neo4jInfoStore(InfoStore):
         self, username: str, keywords: List[str], top_k: int = 3, similarity_threshold: float = 0.75
     ) -> List[ExtractedInfoDB]:
         """
-        Retrieve related information values for the user's keywords.
-        Matches Information nodes where key or value in keywords.
-        Returns full records: username, key, value, relationship, lifetime.
+        Retrieve information relationships for a user matching given keywords.
+
+        Args:
+            username (str): User identifier to filter relationships.
+            keywords (List[str]): Keywords matching node values, keys, or relationship types.
+            top_k (int): Maximum number of results to return.
+            similarity_threshold (float): Threshold parameter for compatibility (unused).
+
+        Returns:
+            List[ExtractedInfoDB]: List of matching info records with metadata.
         """
         if not keywords:
             return []

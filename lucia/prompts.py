@@ -1,10 +1,14 @@
 from typing import Any
 
 """
-Module defining system prompts for personal information extraction, keyword extraction, and chitchat agent interactions.
+Prompts module providing system prompts for Lucia's AI agents:
+    - Personal information extraction (JSON output)
+    - Keyword extraction (JSON list output)
+    - Chitchat agent dialog context
+Ensure extractor prompts yield JSON-only responses without markdown.
 """
 
-# Personal information extraction system prompt
+# System prompt guiding personal information extraction into structured JSON
 info_extraction_system_prompt = """
 # Role and Objective
 - You are an expert personal information extractor AI Agent. 
@@ -64,7 +68,7 @@ Output:
 If no personal information is found, return an empty list (`{{"information": []}}`).
 """
 
-# Keyword extraction system prompt
+# System prompt guiding keyword extraction into a JSON array of keywords
 keyword_extraction_system_prompt = """
 # Role and Objective
 - You are an expert keyword extractor AI Agent. 
@@ -87,7 +91,7 @@ Input: "What should I eat for dinner?"
 Output: [food, dinner, eat, like, preference]
 """
 
-
+# System prompt defining the chitchat AI agent's conversational behavior and reasoning strategy
 chitchat_agent_system_prompt = """
 # Role and Objective
 - You are an helpful personal AI Agent and Friend. 

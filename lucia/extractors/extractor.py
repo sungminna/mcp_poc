@@ -1,5 +1,6 @@
-"""
-Defines abstract base classes (interfaces) for information and keyword extraction.
+"""Extractor interface module.
+
+Defines abstract base classes for personal information and keyword extraction.
 """
 from abc import ABC, abstractmethod
 from typing import List

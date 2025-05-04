@@ -1,3 +1,9 @@
+"""Lucia package initializer.
+
+Exposes core interfaces and singleton factories for LLM clients, extractors,
+embeddings, vector stores, and knowledge/search pipelines.
+"""
+
 # Stores
 from .stores.info_store import InfoStore
 from .stores.info_store_neo4j import Neo4jInfoStore

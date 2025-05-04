@@ -1,3 +1,8 @@
+"""MilvusVectorStore module.
+
+Implements a singleton vector store backend using Milvus for embedding insertion,
+similarity search, and vector ID retrieval, with background flushing support.
+"""
 from typing import List, Dict, Any, Optional
 from .vector_store import VectorStore
 import asyncio
@@ -26,15 +31,27 @@ VECTOR_INDEX_PARAMS = {
 }
 
 class MilvusVectorStore(VectorStore):
+    """Singleton Milvus-based VectorStore implementation.
+
+    Manages a Milvus collection for storing and retrieving vector embeddings.
+    Supports asynchronous insertion, search, and ID lookup operations.
+    """
     _instance = None
     _initialized = False
 
     def __new__(cls, *args, **kwargs):
+        """Implement singleton construction for the vector store instance."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self):
+        """
+        Initialize Milvus connection, collection schema, and background flush worker.
+
+        Connects to Milvus, ensures the collection and index exist,
+        and starts a daemon thread for background flushing.
+        """
         if type(self)._initialized:
             return
         type(self)._initialized = True
@@ -57,6 +74,11 @@ class MilvusVectorStore(VectorStore):
         atexit.register(self._shutdown)
 
     def _ensure_collection_and_index(self):
+        """
+        Ensure the Milvus collection and HNSW index are created and loaded.
+
+        Called during initialization to prepare the storage schema.
+        """
         if not utility.has_collection(MILVUS_COLLECTION_NAME, using=self._alias):
             schema = CollectionSchema([
                 FieldSchema(name=MILVUS_TEXT_FIELD, dtype=DataType.VARCHAR, max_length=5000, is_primary=True, auto_id=False),
@@ -75,7 +97,9 @@ class MilvusVectorStore(VectorStore):
 
     def _flush_worker(self):
         """
-        Background worker that flushes Milvus collection on demand.
+        Background thread that listens for flush signals and commits data.
+
+        Waits on a queue signal and calls Milvus collection.flush().
         """
         while True:
             # Wait for a flush signal
@@ -89,32 +113,57 @@ class MilvusVectorStore(VectorStore):
 
     def _shutdown(self):
         """
-        Wait for all pending flush tasks to complete before shutdown.
+        Shutdown handler to flush pending operations before process exit.
+
+        Blocks until all queued flush tasks complete.
         """
         logger.info("[MilvusVectorStore] waiting for pending flush tasks to complete...")
         self._flush_queue.join()
         logger.info("[MilvusVectorStore] all pending flush tasks completed.")
 
     async def insert_vectors(self, data: List[Dict[str, Any]]) -> List[Any]:
+        """
+        Insert vector embeddings into Milvus and schedule a background flush.
+
+        Args:
+            data (List[Dict[str, Any]]): List of records with keys:
+                'original_text', 'embedding', 'element_type'.
+
+        Returns:
+            List[Any]: Primary keys assigned by Milvus for inserted vectors.
+        """
         if not data:
             return []
-        prepared_data = []
-        for item in data:
-            prepared_data.append({
+        # Prepare insertion payload with normalized text
+        prepared_data = [
+            {
                 MILVUS_VECTOR_FIELD: item["embedding"],
                 MILVUS_ELEMENT_TYPE_FIELD: item["element_type"],
                 MILVUS_TEXT_FIELD: item["original_text"].lower()
-            })
+            }
+            for item in data
+        ]
         try:
-            # Profile insert; schedule background flush
             result = await asyncio.to_thread(self._collection.insert, prepared_data)
-            # Signal background flush
+            # Notify flush worker
             self._flush_queue.put(True)
             return result.primary_keys
         except Exception as e:
             raise RuntimeError(f"Failed to insert vectors: {e}")
 
     async def search_vectors(self, query_embeddings: List[List[float]], top_k: int = 5, similarity_threshold: float = 0.75) -> List[Dict[str, Any]]:
+        """
+        Perform similarity search on embeddings in the Milvus collection.
+
+        Args:
+            query_embeddings (List[List[float]]): Embedding vectors to search.
+            top_k (int): Maximum number of results to return.
+            similarity_threshold (float): Minimum score threshold for hits.
+
+        Returns:
+            List[Dict[str, Any]]: Top-k matching records with keys:
+                'original_text', 'element_type', 'score'.
+        """
         if not query_embeddings:
             return []
         search_params = {
@@ -127,30 +176,40 @@ class MilvusVectorStore(VectorStore):
         try:
             results = await asyncio.to_thread(self._collection.search, **search_params)
             processed_hits = []
-            unique_texts = set()
+            seen = set()
             for hits in results:
                 for hit in hits:
                     if hit.score >= similarity_threshold:
-                        original_text = hit.entity.get(MILVUS_TEXT_FIELD)
-                        element_type = hit.entity.get(MILVUS_ELEMENT_TYPE_FIELD)
-                        if original_text and original_text not in unique_texts:
+                        text = hit.entity.get(MILVUS_TEXT_FIELD)
+                        etype = hit.entity.get(MILVUS_ELEMENT_TYPE_FIELD)
+                        if text and text not in seen:
                             processed_hits.append({
-                                "original_text": original_text,
-                                "element_type": element_type,
+                                "original_text": text,
+                                "element_type": etype,
                                 "score": hit.score
                             })
-                            unique_texts.add(original_text)
+                            seen.add(text)
             processed_hits.sort(key=lambda x: x["score"], reverse=True)
             return processed_hits[:top_k]
         except Exception as e:
             raise RuntimeError(f"Failed to search vectors: {e}")
 
     async def get_vector_id_by_text(self, text: str) -> Optional[Any]:
-        normalized_text = text.strip().lower() if text else ""
-        if not normalized_text:
+        """
+        Retrieve the Milvus primary key for an exact original text match.
+
+        Args:
+            text (str): The original text to lookup.
+
+        Returns:
+            Optional[Any]: Matching primary key if found, otherwise None.
+        """
+        normalized = text.strip().lower() if text else ""
+        if not normalized:
             return None
-        expr = f'{MILVUS_TEXT_FIELD} == "{normalized_text.replace("\"", "\\\"")}"'
-        search_params = {
+        # Construct filter expression for exact match
+        expr = f'{MILVUS_TEXT_FIELD} == "{normalized.replace("\"", "\\\"")}"'
+        params = {
             "data": [],
             "anns_field": MILVUS_VECTOR_FIELD,
             "param": {},
@@ -159,10 +218,9 @@ class MilvusVectorStore(VectorStore):
             "output_fields": [MILVUS_TEXT_FIELD]
         }
         try:
-            results = await asyncio.to_thread(self._collection.search, **search_params)
+            results = await asyncio.to_thread(self._collection.search, **params)
             if results and results[0]:
-                first_hit = results[0][0]
-                return first_hit.entity.get(MILVUS_TEXT_FIELD)
+                return results[0][0].entity.get(MILVUS_TEXT_FIELD)
             return None
         except Exception:
             return None 

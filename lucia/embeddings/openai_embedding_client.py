@@ -10,7 +10,25 @@ from .embedding_client import EmbeddingClient
 
 logger = logging.getLogger(__name__)
 
+"""OpenAI embedding client module.
+
+Provides text embedding via OpenAI API with optional Redis caching.
+Implements the EmbeddingClient interface.
+"""
+
 class OpenAIEmbeddingClient(EmbeddingClient):
+    """Embedding client for OpenAI with optional Redis caching.
+
+    Args:
+        api_key (str, optional): OpenAI API key.
+        model_name (str, optional): Embedding model name.
+        use_cache (bool, optional): Enable Redis caching.
+        redis_host (str, optional): Redis server host.
+        redis_port (int, optional): Redis server port.
+        redis_db (int, optional): Redis database index.
+        redis_password (str, optional): Redis authentication password.
+        cache_ttl_seconds (int, optional): TTL for cache entries in seconds.
+    """
     def __init__(self, api_key: str = None, model_name: str = "text-embedding-3-small", use_cache: bool = False, redis_host: str = None, redis_port: int = None, redis_db: int = 0, redis_password: str = None, cache_ttl_seconds: int = None):
         """
         Initialize OpenAI embedding client with an API key and model name.
@@ -41,11 +59,32 @@ class OpenAIEmbeddingClient(EmbeddingClient):
             )
 
     def _cache_key(self, text: str) -> str:
+        """Generate a Redis cache key for the given text.
+
+        Args:
+            text (str): Input text string.
+
+        Returns:
+            str: Cache key for Redis storage.
+        """
         # Generate a Redis key for caching embeddings of a text
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         return f"emb:{self.model_name}:{digest}"
 
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for multiple texts with optional Redis caching.
+
+        Steps:
+            1. Retrieve cached embeddings from Redis.
+            2. Request new embeddings from OpenAI API.
+            3. Cache new results in Redis if enabled.
+
+        Args:
+            texts (List[str]): List of texts to embed.
+
+        Returns:
+            List[List[float]]: Embedding vectors corresponding to inputs.
+        """
         # Profile Redis cache reads, OpenAI API call, and Redis cache writes separately
         results: List[List[float]] = [None] * len(texts) if texts else []
         texts_to_fetch: List[str] = []

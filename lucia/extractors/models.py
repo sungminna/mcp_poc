@@ -1,3 +1,7 @@
+"""Extractor models module.
+
+Defines Pydantic schemas for personal information extraction and keyword lists.
+"""
 from typing import List
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -5,13 +9,14 @@ from datetime import datetime
 
 class ExtractedInfo(BaseModel):
     """
-    Pydantic model representing a single piece of extracted personal information.
-    Fields:
-      - username: Optional user identifier
-      - key: Superordinate category of the value
-      - value: Extracted noun or adjective
-      - relationship: Verb describing how the user relates to the value
-      - lifetime: Duration for which the relation holds
+    Schema for a single extracted personal information item.
+
+    Attributes:
+        username (Optional[str]): Associated user identifier.
+        key (str): Hypernym category of the value.
+        value (str): Extracted noun or adjective.
+        relationship (str): Verb describing the user's relation to the value.
+        lifetime (str): Duration ('permanent', 'long', 'short') or ISO datetime string.
     """
     username: Optional[str] = Field(None, description="Username associated with this information")
     key: str = Field(..., description="Category hypernym of the value")
@@ -22,8 +27,15 @@ class ExtractedInfo(BaseModel):
 
 class ExtractedInfoDB(BaseModel):
     """
-    Extended Pydantic model for database storage of extracted information.
-    Includes timestamp when the record was inserted.
+    Extended schema for database storage of extracted information.
+
+    Attributes:
+        username (Optional[str]): Associated user identifier.
+        key (str): Hypernym category of the value.
+        value (str): Extracted noun or adjective.
+        relationship (str): Verb describing the user's relation to the value.
+        lifetime (str): Duration or ISO datetime string.
+        inserted_at (Optional[str]): ISO timestamp when the record was saved.
     """
     username: Optional[str] = Field(None, description="Username associated with this information")
     key: str = Field(..., description="Category hypernym of the value")
@@ -34,18 +46,27 @@ class ExtractedInfoDB(BaseModel):
 
 class ExtractedInfoList(BaseModel):
     """
-    Container model for a list of ExtractedInfo objects returned by extractors.
+    Container for a list of ExtractedInfo items returned by extractors.
+
+    Attributes:
+        information (List[ExtractedInfo]): Extracted personal info items.
     """
     information: List[ExtractedInfo] 
 
 class ExtractedInfoDBList(BaseModel):
     """
-    Container model for a list of ExtractedInfoDB objects used for DB operations.
+    Container for a list of ExtractedInfoDB items used in database operations.
+
+    Attributes:
+        information (List[ExtractedInfoDB]): Info records with insertion timestamps.
     """
     information: List[ExtractedInfoDB]
 
 class ExtractedKeywordList(BaseModel):
     """
-    Container model for a list of keywords extracted from user input.
+    Container for keywords extracted from user messages.
+
+    Attributes:
+        keywords (List[str]): List of extracted keyword strings.
     """
     keywords: List[str]
