@@ -1,5 +1,23 @@
 # velt
 
+---
+
+## Core Library: Lucia
+
+**lucia** is a Python library packaging the core AI functionalities originally developed for the **velt** service. It provides modular components for:
+
+- **Personal Information & Keyword Extraction**: Using LLMs (like OpenAI models) to identify key information and topics from text.
+- **Embeddings Generation**: Creating vector representations of text using OpenAI's embedding models, with optional Redis caching.
+- **Data Storage**: Persisting extracted information into graph databases (Neo4j) and vector embeddings into vector stores (Milvus).
+- **Pipelines**: Pre-built workflows (`KnowledgePipeline`, `SearchPipeline`) for common tasks like processing new knowledge or searching existing information.
+- **Customization**: Pluggable architecture allowing replacement of extractors, embedding clients, and storage backends.
+
+For more details on `lucia`, see its dedicated [README](./lucia/README.md).
+
+delos-lucia는 velt서비스의 기능을 재구성해 구현한 파이썬 패키지입니다. 
+
+---
+
 **velt** is a FastAPI-based backend application that integrates a ReAct language agent (via LangGraph), a Neo4j knowledge graph, a Milvus vector store, PostgreSQL, and Redis to deliver a personalized, retrieval-augmented conversational chatbot experience.
 
 ---
