@@ -1,6 +1,10 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 
+from openai.types.responses import ResponseTextDeltaEvent
+from .agent import agent
+
+
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.room_name = self.scope['url_route']['kwargs']['room_name']
@@ -22,17 +26,27 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
     async def receive(self, text_data=None, bytes_data=None):
-        if text_data:
-            text_data_json = json.loads(text_data)
-            message = text_data_json.get('message')
-
-            # Broadcast message to room group
+        # Handle incoming user message and stream assistant tokens
+        if not text_data:
+            return
+        payload = json.loads(text_data)
+        content = payload.get('message')
+        # Broadcast the user message to group
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {'type': 'chat_message', 'message': {'role': 'user', 'content': content}}
+        )
+        # Stream assistant response tokens
+        config = {'configurable': {'thread_id': self.room_name}}
+        # stream_mode='messages' streams tokens
+        async for token, meta in agent.astream(
+            {'messages': [{'role': 'user', 'content': content}]},
+            config,
+            stream_mode='messages'
+        ):
             await self.channel_layer.group_send(
                 self.room_group_name,
-                {
-                    'type': 'chat_message',
-                    'message': message
-                }
+                {'type': 'chat_message', 'message': {'role': 'assistant', 'token': token}}
             )
 
     async def chat_message(self, event):
