@@ -41,12 +41,12 @@
 
         try {
             // Replace with your actual API endpoint if different
-            const response = await fetch('/api/v1/users/', {
+            const response = await fetch('/api/users/register/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ email, username, password }),
+                body: JSON.stringify({ email, password }),
             });
 
             if (!response.ok) {

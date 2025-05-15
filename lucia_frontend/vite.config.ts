@@ -7,7 +7,13 @@ export default defineConfig({
 	server: {
 		proxy: {
 			'/api': {
-				target: 'http://localhost:8888',
+				target: 'http://localhost:8000',
+				changeOrigin: true,
+			},
+			// Proxy only the chat WebSocket path to Django Channels
+			'/ws/chat': {
+				target: 'ws://localhost:8000',
+				ws: true,
 				changeOrigin: true,
 			}
 		}

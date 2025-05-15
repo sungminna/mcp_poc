@@ -20,7 +20,7 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-class ChatHistoryView(APIView):
+class MessageListView(APIView):
     """Return past chat history for a given thread via PostgresSaver state."""
     permission_classes = [permissions.IsAuthenticated]
 
@@ -32,6 +32,20 @@ class ChatHistoryView(APIView):
         state_snapshot = agent.get_state(config)
         # Get message history from agent state
         messages = state_snapshot.values.get("messages", [])
-        # Serialize for front-end
-        data = [{"role": msg.role, "content": msg.content} for msg in messages]
+        # Serialize for front-end, handling dicts and Pydantic message objects
+        data = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                role = msg.get("role")
+                content = msg.get("content")
+            else:
+                raw_role = getattr(msg, "role", None) or getattr(msg, "type", None)
+                if raw_role == "human":
+                    role = "user"
+                elif raw_role in ("ai", "assistant"):
+                    role = "assistant"
+                else:
+                    role = raw_role
+                content = getattr(msg, "content", "")
+            data.append({"role": role, "content": content})
         return Response(data)

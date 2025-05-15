@@ -1,6 +1,6 @@
 <script lang="ts">
     import ChatMessage from '$lib/components/ChatMessage.svelte';
-    import { onMount, afterUpdate, tick } from 'svelte';
+    import { onMount, afterUpdate, tick, onDestroy } from 'svelte';
     import { slide } from 'svelte/transition';
     import { goto } from '$app/navigation';
     import IconSend from '$lib/components/IconSend.svelte';
@@ -14,7 +14,7 @@
         sender: 'user' | 'ai';
         timestamp: string;
     };
-    type Session = { id: number; first_user_message: string; first_ai_response: string };
+    type Session = { id: number; name: string; created_at: string };
 
     let sessions: Session[] = [];
     let selectedSessionId: number | null = null;
@@ -30,13 +30,19 @@
     let groupedMessages: Array<{ type: 'date'; date: string } | { type: 'message'; message: Message }> = [];
     let groupTitle = '새로운 채팅';
     let sidebarCollapsed = false;
+    let socket: WebSocket | null = null;
+    let creatingRoom = false;
+    let streamingAIResponseId: number | null = null;
+    let isSending = false;
 
     // Update header title based on selected session
-    $: groupTitle = selectedSessionId != null ? `Session ${selectedSessionId}` : '새로운 채팅';
+    $: groupTitle = selectedSessionId != null
+        ? sessions.find(s => s.id === selectedSessionId)?.name ?? `Session ${selectedSessionId}`
+        : '새로운 채팅';
 
     // After each update, if loading, scroll down so the loading bubble is visible
     afterUpdate(() => {
-        if (loadingAIResponse) scrollToBottom();
+        // if (loadingAIResponse) scrollToBottom(); // Scroll handled more granularly now
     });
 
     async function fetchSessions() {
@@ -44,7 +50,7 @@
         errorMessage = '';
         try {
             const token = localStorage.getItem('authToken');
-            const res = await fetch('/api/v1/chat/sessions', { headers: { 'Authorization': `Bearer ${token}` } });
+            const res = await fetch('/api/chats/rooms/', { headers: { 'Authorization': `Bearer ${token}` } });
             if (!res.ok) throw new Error('세션 목록을 가져오는데 실패했습니다.');
             sessions = await res.json();
         } catch (err: any) {
@@ -59,15 +65,15 @@
         errorMessage = '';
         try {
             const token = localStorage.getItem('authToken');
-            const res = await fetch(`/api/v1/chat/${sessionId}/messages`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const res = await fetch(`/api/chats/rooms/${sessionId}/messages/`, { headers: { 'Authorization': `Bearer ${token}` } });
             if (!res.ok) throw new Error('메시지 목록을 가져오는데 실패했습니다.');
             const data = await res.json();
-            messages = data.map((m: any) => ({
-                id: m.id,
+            messages = data.map((m: any, idx: number) => ({
+                id: idx,
                 text: m.content,
                 content: m.content,
-                sender: m.sender === 'human' ? 'user' : 'ai',
-                timestamp: m.created_at
+                sender: m.role === 'user' ? 'user' : 'ai',
+                timestamp: new Date().toISOString()
             }));
         } catch (err: any) {
             errorMessage = err.message;
@@ -76,69 +82,106 @@
         }
         await tick();
         scrollToBottom();
+        // Open WebSocket for the selected session
+        await openSocketForSession(sessionId);
     }
 
-    async function getAIResponse(inputText: string): Promise<string> {
-        loadingAIResponse = true;
-        await tick();
-        scrollToBottom();
+    // Function to open a WebSocket connection for a given session
+    async function openSocketForSession(sessionId: number) {
+        // Close existing socket
+        if (socket) {
+            socket.onmessage = null;
+            socket.onclose = null;
+            socket.onerror = null;
+            socket.close();
+            socket = null;
+        }
+
+        const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
         const token = localStorage.getItem('authToken');
-        let aiResponse = '오류: AI 응답을 가져올 수 없습니다.';
-
         if (!token) {
-            loadingAIResponse = false;
-            await goto('/login?redirectTo=/');
-            return '';
+            console.error('No auth token, cannot open WebSocket');
+            errorMessage = '인증 토큰이 없어 연결할 수 없습니다. 다시 로그인해주세요.';
+            return;
         }
 
-        try {
-            const body: any = { user_message: inputText };
-            if (selectedSessionId) body.session_id = selectedSessionId;
-            const response = await fetch('/api/v1/chat/', { 
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                },
-                body: JSON.stringify(body), 
-            });
+        // Establish new socket
+        socket = new WebSocket(`${protocol}://localhost:8000/ws/chat/${sessionId}/?token=${token}`);
+        // Wait for open
+        await new Promise<void>((resolve, reject) => {
+            socket!.addEventListener('open', () => resolve(), { once: true });
+            socket!.addEventListener('error', (e) => reject(e), { once: true });
+        });
 
-            if (response.status === 401) {
-                localStorage.removeItem('authToken');
-                isAuthenticated = false;
-                await goto('/login?sessionExpired=true');
-                return '';
+        // Handle incoming messages
+        socket.onmessage = async (event) => {
+            // Debug: log incoming raw and parsed data
+            console.log('[WS] raw data:', event.data);
+            const parsed = JSON.parse(event.data);
+            console.log('[WS] parsed WS data:', parsed);
+            const { message: incoming } = parsed;
+            const { type, token, content } = incoming;
+
+            switch (type) {
+                case 'token':
+                    if (streamingAIResponseId !== null) {
+                        const idx = messages.findIndex(msg => msg.id === streamingAIResponseId);
+                        if (idx !== -1) {
+                            messages[idx] = {
+                                ...messages[idx],
+                                text: (messages[idx].text || '') + token,
+                                content: (messages[idx].content || '') + token
+                            };
+                            messages = [...messages];
+                            await tick();
+                            await scrollToBottom();
+                        } else {
+                            console.warn('[WS Token] No matching AI message ID:', streamingAIResponseId);
+                        }
+                    }
+                    break;
+                case 'done':
+                    loadingAIResponse = false;
+                    streamingAIResponseId = null;
+                    await scrollToBottom();
+                    break;
+                case 'error':
+                    errorMessage = content;
+                    loadingAIResponse = false;
+                    streamingAIResponseId = null;
+                    await tick();
+                    break;
+                default:
+                    // Ignore non-LLM message types (e.g., user echoes)
+                    break;
             }
+        };
 
-            if (!response.ok) {
-                let errorData = { detail: 'API 오류가 발생했습니다.' };
-                try {
-                  errorData = await response.json();
-                } catch (jsonError) { /* Ignore if response is not JSON */ }
-                throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        // Cleanup on close/error
+        socket.onclose = () => { socket = null; };
+        socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            errorMessage = '웹소켓 연결에 오류가 발생했습니다. 새로고침하거나 다시 시도해주세요.';
+            if (socket) {
+                socket.onmessage = null;
+                socket.onclose = null;
+                socket.onerror = null;
+                socket.close();
+                socket = null;
             }
+        };
+    }
 
-            const data = await response.json();
-            
-            if (data && data.ai_response) {
-                if (!selectedSessionId && data.session_id) {
-                    selectedSessionId = data.session_id;
-                    await fetchSessions();
-                }
-                aiResponse = data.ai_response;
-            } else {
-                console.error('Unexpected API response format:', data);
-                throw new Error('수신된 데이터 형식이 올바르지 않습니다.');
-            }
+    onDestroy(() => {
+        socket?.close();
+    });
 
-        } catch (error: any) {
-            console.error('Failed to get AI response:', error);
-            errorMessage = error.message || 'AI 응답 처리 중 오류 발생';
-            aiResponse = errorMessage; 
-        } finally {
-            loadingAIResponse = false;
-        }
-        return aiResponse;
+    // Handle starting a new chat: clear messages and reset socket
+    function handleNewChat() {
+        socket?.close();
+        socket = null;
+        selectedSessionId = null;
+        messages = [];
     }
 
     async function scrollToBottom() {
@@ -158,26 +201,127 @@
         }
     }
 
+    // Refactored sendMessage to use WebSocket
     async function sendMessage() {
-        const text = newMessageText.trim();
-        if (!text || loadingAIResponse) return;
-
-        messages = [...messages, { id: Date.now(), text, content: text, sender: 'user', timestamp: new Date().toISOString() }];
-        await tick();
-        scrollToBottom();
+        // Capture and clear input immediately
+        const textToSend = newMessageText.trim();
+        if (!textToSend || loadingAIResponse || isSending) return;
+        
+        isSending = true;
 
         newMessageText = '';
-        await tick();
         adjustTextareaHeight();
 
-        const aiResponseText = await getAIResponse(text);
-        if (aiResponseText) {
-            messages = [...messages, { id: Date.now() + 1, text: aiResponseText, content: aiResponseText, sender: 'ai', timestamp: new Date().toISOString() }];
+        errorMessage = '';
+        const token = localStorage.getItem('authToken');
+        if (!token) {
+            await goto('/login');
+            isSending = false;
+            return;
+        }
+
+        try {
+            // Ensure a chat room exists if one isn't selected.
+            if (!selectedSessionId) {
+                if (creatingRoom) {
+                    isSending = false;
+                    return;
+                }
+                creatingRoom = true;
+                try {
+                    const resRoom = await fetch('/api/chats/rooms/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ name: textToSend.substring(0, 50) })
+                    });
+                    if (!resRoom.ok) {
+                        errorMessage = '챗 세션 생성에 실패했습니다.';
+                        isSending = false;
+                        return;
+                    }
+                    const newRoom = await resRoom.json();
+                    selectedSessionId = newRoom.id;
+                    await fetchSessions();
+                    await openSocketForSession(selectedSessionId);
+                } catch (err) {
+                    errorMessage = '챗 세션 생성 중 오류가 발생했습니다.';
+                    isSending = false;
+                    return;
+                } finally {
+                    creatingRoom = false;
+                }
+            }
+
+            // Append user message to the local messages array
+            const userMessageId = Date.now();
+            messages = [...messages, { id: userMessageId, text: textToSend, content: textToSend, sender: 'user', timestamp: new Date().toISOString() }];
             await tick();
+            scrollToBottom();
+
+            // Prepare for AI response
+            loadingAIResponse = true; // Indicate that an AI response is expected
+
+            // Add a placeholder for the AI's message and store its ID
+            const aiMessageId = Date.now() + 1; // Ensure unique ID, slightly offset from user message
+            streamingAIResponseId = aiMessageId;
+            messages = [
+                ...messages,
+                {
+                    id: aiMessageId,
+                    text: '', // Start with empty text
+                    content: '',
+                    sender: 'ai',
+                    timestamp: new Date().toISOString()
+                }
+            ];
+            await tick();
+            scrollToBottom(); // Scroll to show the AI placeholder
+
+            // Ensure WebSocket is open and then send the message
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                try {
+                    await openSocketForSession(selectedSessionId!);
+                    if (!socket || socket.readyState !== WebSocket.OPEN) {
+                        errorMessage = '웹소켓 연결을 다시 설정할 수 없습니다. 새로고침 해주세요.';
+                        loadingAIResponse = false;
+                        streamingAIResponseId = null;
+                        messages = messages.filter(m => m.id !== aiMessageId);
+                        isSending = false;
+                        return;
+                    }
+                    errorMessage = ''; // Clear previous error if connection succeeds
+                } catch (e) {
+                    errorMessage = '웹소켓 연결 중 오류가 발생했습니다. 새로고침 해주세요.';
+                    loadingAIResponse = false;
+                    streamingAIResponseId = null;
+                    messages = messages.filter(m => m.id !== aiMessageId);
+                    isSending = false;
+                    return;
+                }
+            }
             
-            setTimeout(() => {
-                scrollToBottom();
-            }, 100);
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ message: textToSend }));
+            } else {
+                 errorMessage = '웹소켓이 연결되지 않아 메시지를 보낼 수 없습니다.';
+                 loadingAIResponse = false;
+                 streamingAIResponseId = null;
+                 messages = messages.filter(m => m.id !== aiMessageId);
+            }
+        
+        } catch (error) {
+            console.error("Error in sendMessage:", error);
+            errorMessage = "메시지 전송 중 오류가 발생했습니다.";
+            loadingAIResponse = false;
+            streamingAIResponseId = null;
+            if (streamingAIResponseId) {
+                 messages = messages.filter(m => m.id !== streamingAIResponseId);
+            }
+        } finally {
+            isSending = false;
         }
     }
 
@@ -203,7 +347,7 @@
     async function deleteChatSession(sessionId: number) {
         const token = localStorage.getItem('authToken');
         try {
-            const res = await fetch(`/api/v1/chat/${sessionId}`, {
+            const res = await fetch(`/api/chats/rooms/${sessionId}/`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -242,7 +386,7 @@
 
 <div class="layout">
     <aside class="sidebar {sidebarCollapsed ? 'collapsed' : ''}">
-        <button class="new-chat" on:click={() => { selectedSessionId = null; messages = []; }}>New Chat</button>
+        <button class="new-chat" on:click={handleNewChat}>New Chat</button>
         {#if sessionsLoading}
             <div class="sidebar-spinner"><div class="spinner"></div></div>
         {:else}
@@ -250,18 +394,10 @@
             <div class="session-item {sess.id === selectedSessionId ? 'selected' : ''}" on:click={() => { selectedSessionId = sess.id; fetchMessages(sess.id); }}>
                 <div class="session-info">
                     <div class="session-name">
-                        {sess.first_user_message
-                            ? (sess.first_user_message.length > 20
-                                ? sess.first_user_message.slice(0,20) + '...'
-                                : sess.first_user_message)
-                            : '새로운 대화'}
+                        {sess.name.length > 20 ? sess.name.slice(0,20) + '...' : sess.name}
                     </div>
                     <div class="session-time">
-                        {sess.first_ai_response
-                            ? (sess.first_ai_response.length > 20
-                                ? sess.first_ai_response.slice(0,20) + '...'
-                                : sess.first_ai_response)
-                            : ''}
+                        {new Date(sess.created_at).toLocaleString()}
                     </div>
                 </div>
                 <button class="delete-button" on:click={(e) => { e.stopPropagation(); deleteChatSession(sess.id); }} aria-label="Delete session">삭제</button>
@@ -303,13 +439,13 @@
                             <div class="date-sep">{item.date}</div>
                         {:else}
                             <div transition:slide={{ duration: 300 }}>
-                                <ChatMessage message={item.message} />
+                                <ChatMessage
+                                    message={item.message}
+                                    isLoading={item.message.id === streamingAIResponseId}
+                                />
                             </div>
                         {/if}
                     {/each}
-                    {#if loadingAIResponse}
-                        <ChatMessage message={{ id: -1, text: '...', sender: 'ai', timestamp: new Date().toISOString() }} isLoading={true}/>
-                    {/if}
                 </div>
                 {/if}
             {/if}
@@ -322,14 +458,14 @@
                     bind:value={newMessageText}
                     placeholder="메시지 입력"
                     on:keydown={(e) => {
-                        if (e.key === 'Enter') {
+                        if (e.key === 'Enter' && !e.isComposing) {
                             e.preventDefault();
                             sendMessage();
                         }
                     }}
                 />
             </div>
-            <button class="icon-button action-button" on:click={sendMessage} disabled={!newMessageText.trim() || loadingAIResponse} aria-label="Send">
+            <button class="icon-button action-button" on:click={sendMessage} disabled={!newMessageText.trim() || loadingAIResponse || isSending} aria-label="Send">
                 <IconSend />
             </button>
         </div>

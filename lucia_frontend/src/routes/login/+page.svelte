@@ -3,7 +3,7 @@
     import { page } from '$app/stores'; // Import page store to read query params
     import { onMount } from 'svelte';
 
-    let username = ''; // Changed from email to username
+    let email = '';
     let password = '';
     let errorMessage = '';
     let successMessage = ''; // For showing signup success
@@ -14,8 +14,8 @@
 
     async function handleLogin(event: SubmitEvent) {
         event.preventDefault();
-        if (!username || !password) { // Check username instead of email
-            errorMessage = '사용자 이름과 비밀번호를 입력해주세요.';
+        if (!email || !password) {
+            errorMessage = '이메일과 비밀번호를 입력해주세요.';
             successMessage = ''; // Clear success message on new attempt
             return;
         }
@@ -27,11 +27,11 @@
 
         try {
             const formData = new URLSearchParams();
-            formData.append('username', username); // Use username directly
+            formData.append('email', email);
             formData.append('password', password);
 
             // Replace with your actual API endpoint if different
-            const response = await fetch('/api/v1/auth/token', {
+            const response = await fetch('/api/users/login/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -50,8 +50,8 @@
 
             const data = await response.json();
 
-            if (data.access_token) {
-                localStorage.setItem('authToken', data.access_token);
+            if (data.access) {
+                localStorage.setItem('authToken', data.access);
                 await goto('/'); // Redirect to chat page
             } else {
                 throw new Error('토큰이 수신되지 않았습니다.');
@@ -90,8 +90,8 @@
 
         <form on:submit={handleLogin} bind:this={formElement} class="auth-form">
             <div class="form-group">
-                <label for="username">사용자 이름</label>
-                <input type="text" id="username" bind:value={username} required placeholder="사용자 이름 입력">
+                <label for="email">이메일</label>
+                <input type="email" id="email" bind:value={email} required placeholder="이메일 입력">
             </div>
             <div class="form-group">
                 <label for="password">비밀번호</label>
