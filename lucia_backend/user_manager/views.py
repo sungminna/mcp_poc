@@ -13,12 +13,15 @@ class RegisterView(APIView):
     permission_classes = [permissions.AllowAny]
     def post(self, request):
         email = request.data.get('email')
+        username = request.data.get('username')
         password = request.data.get('password')
-        if not email or not password:
-            return Response({'detail': 'Email and password required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not email or not username or not password:
+            return Response({'detail': 'Email, username and password required.'}, status=status.HTTP_400_BAD_REQUEST)
         if User.objects.filter(email=email).exists():
             return Response({'detail': 'Email is already registered.'}, status=status.HTTP_400_BAD_REQUEST)
-        user = User.objects.create_user(username=email, email=email, password=password)
+        if User.objects.filter(username=username).exists():
+            return Response({'detail': 'Username is already taken.'}, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.create_user(username=username, email=email, password=password)
         refresh = RefreshToken.for_user(user)
         return Response({'refresh': str(refresh), 'access': str(refresh.access_token)}, status=status.HTTP_201_CREATED)
 

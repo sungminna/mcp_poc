@@ -60,9 +60,9 @@ class State(AgentState):
     # Field to hold the parsed structured response from the LLM
     structured_response: ChatResponse
 
-def prompt(state: AgentState, config: RunnableConfig) -> list[AnyMessage]:  
+def prompt(state: AgentState, config: RunnableConfig) -> list[AnyMessage]:
     user_name = config["configurable"].get("user_name")
-    system_msg = f"You are a helpful assistant. Address the user as {user_name}."
+    system_msg = f"You are a helpful assistant. The user's name is {user_name}. Always address the user by this name."
     return [{"role": "system", "content": system_msg}] + state["messages"]
 
 
