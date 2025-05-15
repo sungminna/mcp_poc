@@ -91,8 +91,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         try:
             payload = json.loads(text_data)
             content = payload.get('message')
-            # stream_mode from payload is no longer directly used for agent.astream
-            # client_stream_mode = payload.get('stream_mode', 'messages') 
             
             if not content:
                 logger.warning(f"Received empty message from user {self.user.pk} in room {self.room.pk}")
